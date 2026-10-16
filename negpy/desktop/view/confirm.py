@@ -33,6 +33,26 @@ def confirm_load_roll(parent, repo, image_count: int, label: str) -> bool:
     return True
 
 
+def warn_targets_affect_unbaked(parent, repo) -> None:
+    """On a confirmed target change, advise that unbaked frames move with the new targets, and
+    that baking a frame first keeps it fixed. Skippable via "Don't show again", persisted so a
+    one-time retune does not re-prompt for every frame after."""
+    if repo.get_global_setting("exposure_targets_warn_dismissed", False):
+        return
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Information)
+    box.setWindowTitle("Auto Density and Grade Targets")
+    box.setText("Changing the targets affects every frame, including ones not yet baked.")
+    box.setInformativeText("Bake Auto Density and Grade on a frame before you change the targets to keep its density and grade fixed.")
+    dismiss = QCheckBox("Don't show again")
+    box.setCheckBox(dismiss)
+    ok = box.addButton("OK", QMessageBox.ButtonRole.AcceptRole)
+    box.setDefaultButton(ok)
+    box.exec()
+    if dismiss.isChecked():
+        repo.save_global_setting("exposure_targets_warn_dismissed", True)
+
+
 def confirm_close_roll(parent, roll_name: str | None) -> bool:
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Question)
@@ -282,6 +302,18 @@ def _confirm_with_verb(parent, title: str, text: str, informative: str, verb: st
     return box.clickedButton() is accept
 
 
+def confirm_remove_from_roll(parent, count: int, roll_name: str) -> bool:
+    """Ask before frames leave a roll. Their files and edits stay."""
+    subject = "this frame" if count == 1 else f"the {count_of(count, 'selected frame')}"
+    return _confirm_with_verb(
+        parent,
+        "Remove from Roll",
+        f"Remove {subject} from “{roll_name}”?",
+        "The files and their edits stay. Their scene, card locks and own edit in this roll are deleted.",
+        "Remove",
+    )
+
+
 def confirm_unfork_edit(parent) -> bool:
     """Ask before this roll's own edit for a frame goes and the frame returns to the
     edit every other roll it belongs to already shares."""
@@ -308,3 +340,29 @@ def confirm_undiptych(parent) -> bool:
 def warn_invalid_roll_name(parent, title: str) -> None:
     """The one wording for a roll name the library cannot store, wherever it is typed."""
     QMessageBox.warning(parent, title, 'A roll name cannot contain / \\ : * ? " < > | or start or end with a dot.')
+
+
+def confirm_move_to_trash(parent, count: int) -> bool:
+    """Ask before frames' files leave the disk for the OS Trash."""
+    text = f"Move the {count_of(count, 'selected frame')} to the Trash?" if count > 1 else "Move this frame to the Trash?"
+    return _confirm_with_verb(
+        parent,
+        "Move to Trash",
+        text,
+        "The source files and their sidecars go to the Trash. The edits stay in the database, so a restored file keeps its edit.",
+        "Move to Trash",
+    )
+
+
+def warn_trash_composite(parent) -> None:
+    """A frame made from several files, or one file split in two, does not go to the Trash."""
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Information)
+    box.setWindowTitle("Move to Trash")
+    box.setText("Stitches, HDR merges, trichromes and half-frame scans cannot go to the Trash.")
+    box.setInformativeText(
+        "Dissolve them first: Unstitch, Unmerge Exposures, Unsplit Diptych, "
+        "or turn off Trichrome Mode or Half Frame Mode on the Roll tab. Then move their files to the Trash."
+    )
+    box.setStandardButtons(QMessageBox.StandardButton.Close)
+    box.exec()

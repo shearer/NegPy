@@ -2,7 +2,7 @@ import os
 from enum import StrEnum
 
 import qtawesome as qta
-from PyQt6.QtCore import QUrl, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import QTimer, QUrl, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QDesktopServices, QIntValidator
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -152,6 +152,8 @@ class ScanSidebar(QWidget):
     """Scanner control panel — replaces the originally planned modal ScanDialog."""
 
     _INDETERMINATE_SCAN_PHASES = frozenset({"Preparing long exposure", "Merging exposures"})
+    # How often the panel asks whether film is loaded. A unit that ejects without a command needs it.
+    _MEDIA_POLL_MS = 1500
 
     cards_changed = pyqtSignal()
 
@@ -163,6 +165,8 @@ class ScanSidebar(QWidget):
         self._devices: list[ScannerDevice] = []
         self._scanning = False
         self._devices_loaded = False
+        self._media_loaded: bool | None = None  # the last poll for the selected device, None if unknown
+        self._media_poll_pending = False
         self._caps_autofocus = False
         self._caps_auto_exposure = False
         self._caps_clean = False
@@ -277,15 +281,10 @@ class ScanSidebar(QWidget):
         self.debug_log_widget = self._row_widget(field_row("Debug log", self.debug_log_btn, self.debug_log_folder_btn))
         device.addWidget(self.debug_log_widget)
 
-        # Crop info sits to the right of Frame info, and only appears once there is a crop
-        # to report — Prescan's own crop, when the connected backend uses Prescan at all.
-        frame_info_row = QHBoxLayout()
-        self.frame_label = hint_label("")
+        # The crop label shows only when there is a crop. This crop is the Prescan crop.
         self.crop_label = hint_label("")
         self.crop_label.setVisible(False)
-        frame_info_row.addWidget(self.frame_label)
-        frame_info_row.addWidget(self.crop_label, 1)
-        device.addLayout(frame_info_row)
+        device.addWidget(self.crop_label)
         layout.addWidget(self.device_body)
 
         # ── FILM & QUALITY ───────────────────────────────────
@@ -487,6 +486,11 @@ class ScanSidebar(QWidget):
         self.controller.scan_ejected.connect(self._on_ejected)
         self.controller.scan_eject_error.connect(self._on_eject_error)
         self.controller.scan_strip_returned.connect(self._on_strip_returned)
+        self.controller.scan_media_polled.connect(self._on_media_polled)
+        self._media_timer = QTimer(self)
+        self._media_timer.setInterval(self._MEDIA_POLL_MS)
+        self._media_timer.timeout.connect(self._poll_media)
+        self._media_timer.start()
         self.controller.scan_exposure_metered.connect(self._on_exposure_metered)
         self.controller.scan_meter_error.connect(self._on_meter_error)
 
@@ -587,7 +591,38 @@ class ScanSidebar(QWidget):
         self._update_device_caps()
 
     def _on_device_changed(self, _index: int) -> None:
+        self._media_loaded = None
         self._update_device_caps()
+
+    def _poll_media(self) -> None:
+        """Ask whether film is loaded, while the panel shows and the unit is idle.
+
+        The right panel shows the parts of this widget, not the widget, thus the footer tells if the panel shows.
+        """
+        device = self._current_device()
+        if device is None or self._scanning or self._media_poll_pending or not self.footer.isVisible():
+            return
+        self._media_poll_pending = True
+        self.controller.poll_scanner_media(device.id)
+
+    @pyqtSlot(str, object)
+    def _on_media_polled(self, device_id: str, loaded: bool | None) -> None:
+        self._media_poll_pending = False
+        device = self._current_device()
+        if loaded is None or device is None or device.id != device_id:
+            return
+        before, self._media_loaded = self._media_loaded, loaded
+        if before is None:
+            if not loaded:
+                self.status_strip.set_message("No film loaded")
+            return
+        if loaded == before:
+            return
+        if loaded:
+            self.status_strip.set_message("Film loaded")
+            return
+        stale = self._drop_strip_state()
+        self.status_strip.set_message("Film removed — frame selection cleared" if stale else "Film removed")
 
     def _current_device(self) -> ScannerDevice | None:
         device_id = self.device_combo.currentData()
@@ -602,7 +637,6 @@ class ScanSidebar(QWidget):
         device = self._current_device()
         if device is None:
             self.scan_btn.setEnabled(False)
-            self.frame_label.setText("")
             self.dpi_combo.setEnabled(False)
             self.depth_btn.setEnabled(False)
             self.depth_widget.setVisible(False)
@@ -646,7 +680,6 @@ class ScanSidebar(QWidget):
         self.mode_btn.setEnabled(True)
         self.eject_btn.setVisible(caps.can_eject)
         self.eject_btn.setEnabled(caps.can_eject and not self._scanning)
-        self.frame_label.setText(f"Frame: {caps.max_area_mm[0]:.0f} × {caps.max_area_mm[1]:.0f} mm")
 
         # If no film sources, show banner
         if not caps.sources:
@@ -1446,11 +1479,13 @@ class ScanSidebar(QWidget):
         if not triggered:
             self.status_strip.set_message("This device has no eject control")
             return
+        self._media_loaded = False
         stale = self._drop_strip_state()
         self.status_strip.set_message("Film ejected — frame selection cleared" if stale else "Film ejected")
 
     @pyqtSlot(bool)
     def _on_strip_returned(self, loaded: bool) -> None:
+        self._media_loaded = loaded
         stale = self._drop_strip_state()
         if not loaded:
             message = "The scanner returned the strip while idle — insert it again"

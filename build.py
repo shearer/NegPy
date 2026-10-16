@@ -70,16 +70,20 @@ params = [
     # lookup actually looks.
     "--hidden-import=pieusb",
     "--collect-all=libusb_package",
-    # Plustek / pyopticfilm: ship PyUSB + bundled libusb on Windows only.
-    # Linux/macOS use host libusb via PyUSB (same stack SANE needs).
+    # Plustek / pyopticfilm on every platform. --collect-all pulls in
+    # pyopticfilm.device.data (7600i V1 capture tables via importlib.resources);
+    # a bare analysis miss leaves Linux/macOS freezes without that package.
+    "--hidden-import=pyopticfilm",
+    "--hidden-import=pyopticfilm.device.data",
+    "--collect-all=pyopticfilm",
+    # Ship PyUSB + bundled libusb on Windows only. Linux/macOS use host libusb
+    # via PyUSB (same stack SANE needs).
     *(
         [
             "--hidden-import=usb",
             "--hidden-import=usb.core",
             "--hidden-import=usb.backend.libusb1",
-            "--hidden-import=pyopticfilm",
             "--collect-all=usb",
-            "--collect-all=pyopticfilm",
         ]
         if is_windows
         else []

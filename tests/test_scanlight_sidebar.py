@@ -2084,3 +2084,92 @@ def test_triplet_scan_request_carries_no_sensor_profile(tmp_path, monkeypatch):
     w.output.roll_edit.setText("Roll001")
     w._start_capture(retake=False)
     assert w.controller.start_capture.call_args[0][0].sensor_profile == ""
+
+
+def _finish_scan(w):
+    w.set_scanning(True)
+    w.controller.set_scanlight_color.reset_mock()
+    w._on_finished(["/roll/Roll_Frame004_R.cr3"])
+
+
+def test_scan_without_live_view_leaves_the_light_off_by_default():
+    w = _sidebar()
+    assert not w.keep_light_btn.isChecked()
+    _finish_scan(w)
+    w.controller.set_scanlight_color.assert_not_called()
+
+
+def test_keep_light_on_relights_after_a_scan_without_live_view():
+    w = _sidebar()
+    w.keep_light_btn.setChecked(True)
+    _finish_scan(w)
+    assert w.controller.set_scanlight_color.called
+
+
+def test_keep_light_on_relights_after_a_canceled_scan():
+    w = _sidebar()
+    w.keep_light_btn.setChecked(True)
+    w.set_scanning(True)
+    w.controller.set_scanlight_color.reset_mock()
+    w._on_cancelled()
+    assert w.controller.set_scanlight_color.called
+
+
+def test_keep_light_on_relights_after_a_failed_scan():
+    w = _sidebar()
+    w.keep_light_btn.setChecked(True)
+    w.set_scanning(True)
+    w.controller.set_scanlight_color.reset_mock()
+    w._on_error("camera disconnected")
+    assert w.controller.set_scanlight_color.called
+
+
+def test_a_failed_light_write_does_not_relight():
+    w = _sidebar()
+    w.keep_light_btn.setChecked(True)
+    w.controller.set_scanlight_color.reset_mock()
+    w._on_error("Scanlight: write failed")  # no scan running: the light itself failed
+    w.controller.set_scanlight_color.assert_not_called()
+
+
+def test_keep_light_on_is_saved_and_restored():
+    w = _sidebar()
+    w.keep_light_btn.setChecked(True)
+    key, saved = w.controller.session.repo.save_global_setting.call_args[0]
+    assert key == "scanlight_settings" and saved["keep_light_on"] is True
+
+    ctrl = MagicMock()
+    ctrl.session.repo.get_global_setting.return_value = saved
+    assert ScanlightSidebar(ctrl).keep_light_btn.isChecked()
+
+
+def test_keep_light_on_shows_only_with_a_scanlight():
+    w = _sidebar()
+    assert not w.keep_light_btn.isHidden()
+    w._set_rgb_mode(False)
+    assert w.keep_light_btn.isHidden()
+    w._set_rgb_mode(True)
+    assert not w.keep_light_btn.isHidden()
+
+
+@pytest.mark.parametrize(("single", "expected"), [(True, (200, 100, 90, 0)), (False, (25, 12, 11, 0))])
+def test_keep_light_on_relights_each_preset_at_its_framing_light(monkeypatch, single, expected):
+    w = _sidebar()
+    _select_stored(w, monkeypatch, _rgb_preset(single_capture=single))
+    w.keep_light_btn.setChecked(True)
+    _finish_scan(w)
+    assert w.controller.set_scanlight_color.call_args[0][:4] == expected
+
+
+@pytest.mark.parametrize("hidden", [False, True])
+def test_keep_light_on_shortcut_acts_only_while_the_toggle_shows(hidden):
+    from negpy.desktop.view.keyboard_shortcuts import ShortcutManager
+
+    manager = ShortcutManager.__new__(ShortcutManager)
+    manager.window = MagicMock()
+    btn = manager.window.right_panel.scanlight_sidebar.keep_light_btn
+    btn.isHidden.return_value = hidden
+
+    manager._build_actions()["scanlight_keep_light_on"]()
+
+    assert btn.toggle.called is not hidden

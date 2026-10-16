@@ -1053,6 +1053,13 @@ def test_placeholder_item_uses_the_full_thumbnail_cell(qapp):
     assert delegate.sizeHint(QStyleOptionViewItem(), QModelIndex()) == view.iconSize()
 
 
+def test_grid_hover_follows_a_plain_pointer_move(qapp):
+    view = ThumbnailGridView(target_cell=THUMB_CELL_MIN)
+
+    assert view.viewport().hasMouseTracking()
+    assert view.viewport().testAttribute(Qt.WidgetAttribute.WA_Hover)
+
+
 def test_active_placeholder_curtain_advances_across_the_glyph(qapp):
     asset = _composite_assets()["plain"]
 

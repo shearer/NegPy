@@ -67,9 +67,8 @@ def cast_removal_for_mode(mode: str, strength: float) -> float:
     """The Cast Removal strength `mode` starts at, given the strength carried in.
 
     A transparency starts at 0 and a negative at the shipped default: on a negative the
-    control defeats the orange mask, which is never part of the picture, while on a slide
-    it corrects a faded original's crossover — a deliberate act, since a slide's cast can
-    be the photograph. Only the other mode's default is rewritten, so a strength the user
+    control removes the cast the stretch leaves, while on a slide it corrects a faded
+    original's crossover — a deliberate act, since a slide's cast can be the photograph. Only the other mode's default is rewritten, so a strength the user
     chose survives a mode switch.
     """
     default = float(ExposureConfig.cast_removal_strength)
@@ -138,6 +137,12 @@ class ProcessConfig:
     # image, the same space as the manual crop rect. When set it is the exact area the
     # black/white-point meters read. None falls back to the analysis_buffer slider.
     analysis_rect: Optional[tuple] = None
+    # On a frame with no crop, the picture box the meters read instead of the whole frame: Auto
+    # Crop's rect, when the film sits in an opaque holder or on bare light (resolve_meter_rect).
+    # None meters the whole frame. meter_key is the detection it was resolved under, frozen like
+    # an auto crop.
+    meter_rect: Optional[tuple] = None
+    meter_key: str = ""
     # Two normalization clip axes: luma sets the black/white-point span, color sets
     # the per-channel balance clip (orange-mask cast removal).
     luma_range_clip: float = 0.0
@@ -223,6 +228,8 @@ class ProcessConfig:
             object.__setattr__(self, "sensor_matrix", tuple(self.sensor_matrix))
         if self.analysis_rect is not None:
             object.__setattr__(self, "analysis_rect", tuple(self.analysis_rect))
+        if self.meter_rect is not None:
+            object.__setattr__(self, "meter_rect", tuple(self.meter_rect))
 
     @property
     def is_local_initialized(self) -> bool:

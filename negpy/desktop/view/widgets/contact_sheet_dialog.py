@@ -6,7 +6,7 @@ from PyQt6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QImage, QPainter, QPen
 from PyQt6.QtWidgets import QDialog, QHBoxLayout, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
-from negpy.desktop.view.canvas.overlay import draw_resize_handles, draw_view_badge, hit_resize_handle, resize_cursor
+from negpy.desktop.view.canvas.overlay import draw_resize_handles, draw_view_badge, hit_resize_handle, resize_cursor, view_badge_width
 from negpy.desktop.view.styles.templates import (
     FIELD_LABEL_WIDTH,
     field_label,
@@ -189,8 +189,8 @@ class SheetCanvas(QWidget):
         corners, edges = self._handles()
         draw_resize_handles(painter, corners, edges)
         if self._drag is not None and self._readout:
-            width = painter.fontMetrics().horizontalAdvance(self._readout) + 2 * THEME.space_lg
-            draw_view_badge(painter, self._readout, (self.width() - width) / 2, THEME.space_lg, width)
+            width = view_badge_width(painter, self._readout, dot=False)
+            draw_view_badge(painter, self._readout, (self.width() - width) / 2, THEME.space_lg, width, dot=False)
         painter.end()
 
     def mousePressEvent(self, event) -> None:  # noqa: N802

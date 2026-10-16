@@ -34,6 +34,7 @@ from negpy.desktop.view.styles.templates import (
     field_row,
     header_row,
     hint_label,
+    ICON_BUTTON_WIDTH,
     icon_button,
     labeled_action,
     labeled_toggle,
@@ -41,6 +42,7 @@ from negpy.desktop.view.styles.templates import (
     section_subheader,
     set_hint_kind,
     StatusStrip,
+    tool_toggle,
     wrap_tooltip,
 )
 from negpy.desktop.view.styles.theme import THEME
@@ -399,10 +401,19 @@ class ScanlightSidebar(QWidget):
         self.status_strip = StatusStrip()
         foot.addWidget(self.status_strip)
         self.lv_btn = labeled_toggle("fa5s.video", " Live View", False, "Open the live view to frame and focus")
-        self.retake_btn = labeled_action("fa5s.redo", " Retake", "Capture the last frame again, without advancing the frame number")
+        self.retake_btn = icon_button("fa5s.redo", "Retake: capture the last frame again, without advancing the frame number")
+        self.keep_light_btn = tool_toggle(
+            "fa5s.lightbulb",
+            "",
+            "Keep Light On: keep the Scanlight lit after each scan, to frame the next one on the camera's screen. "
+            "Live View re-lights it without this.",
+        )
+        self.keep_light_btn.setChecked(self._settings.keep_light_on)
+        self.keep_light_btn.setFixedWidth(ICON_BUTTON_WIDTH)
         actions = QHBoxLayout()
         actions.addWidget(self.lv_btn, 1)
-        actions.addWidget(self.retake_btn, 1)
+        actions.addWidget(self.retake_btn)
+        actions.addWidget(self.keep_light_btn)
         foot.addLayout(actions)
         self.scan_btn = QPushButton(" Scan")
         self.scan_btn.setObjectName("scan_btn")
@@ -418,6 +429,7 @@ class ScanlightSidebar(QWidget):
     def _connect_signals(self) -> None:
         self.off_btn.clicked.connect(self._on_light_off)
         self.lv_btn.toggled.connect(self._on_live_view_toggled)
+        self.keep_light_btn.toggled.connect(self._on_keep_light_toggled)
         self.scan_btn.clicked.connect(self._on_scan)
         self.retake_btn.clicked.connect(self._on_retake)
         self.preset_combo.activated.connect(self._on_preset_selected)
@@ -1166,12 +1178,16 @@ class ScanlightSidebar(QWidget):
             return clip
         return clip if float(np.mean(thumb * clip.reference)) >= _SAME_PICTURE else None
 
-    def _after_capture_live_view(self) -> None:
-        """Re-light the preview after a scan. An in-session capture leaves the Scanlight
-        off (capture_triplet turns it off in its finally) while the live-view stream keeps
-        running, so just push the framing light back. No-op when live view is off."""
-        if self.lv_btn.isChecked():
+    def _relight_after_capture(self) -> None:
+        """Push the framing light back after a scan, which ends with the Scanlight off (the
+        capture service turns it off in its finally). Only while Live View streams, or when
+        Keep Light On asks for it to frame the next shot on the camera's screen."""
+        if self.lv_btn.isChecked() or self._settings.keep_light_on:
             self._push_light()
+
+    def _on_keep_light_toggled(self, on: bool) -> None:
+        self._settings = replace(self._settings, keep_light_on=on)
+        self._save_settings()
 
     @pyqtSlot(str)
     def _on_live_view_unsupported(self, reason: str) -> None:
@@ -1582,7 +1598,7 @@ class ScanlightSidebar(QWidget):
         frame = paths[0].split("_Frame")[-1][:3] if paths else ""
         self.lv_window.flash_captured(frame)
         self._set_status(f"Captured frame {frame} — inverting in NegPy…")
-        self._after_capture_live_view()  # re-light the still-running preview
+        self._relight_after_capture()
 
     @pyqtSlot()
     def _on_cancelled(self) -> None:
@@ -1593,7 +1609,7 @@ class ScanlightSidebar(QWidget):
             self._set_status("Calibration canceled")
             return
         self._set_status("Capture canceled")
-        self._after_capture_live_view()
+        self._relight_after_capture()
 
     def _finish_calibration_terminal(self, status: str) -> None:
         """Restore the scan UI after calibration stops without producing a preset."""
@@ -1608,6 +1624,9 @@ class ScanlightSidebar(QWidget):
 
     @pyqtSlot(str)
     def _on_error(self, msg: str) -> None:
+        # Only a failed capture re-lights: a failed light write also lands here, and re-lighting
+        # on it would retry the dead light in a loop.
+        was_scanning = self._scanning
         self.set_scanning(False)
         self.lv_window.clear_progress()
         if self._calibrating_preset:
@@ -1619,6 +1638,8 @@ class ScanlightSidebar(QWidget):
                 # preview. The operator can reopen it to establish a fresh session.
                 self.lv_btn.setChecked(False)
             self._set_status(f"Error: {msg}")
+            if was_scanning and self._settings.keep_light_on:
+                self._push_light()
 
     @pyqtSlot(str)
     def _on_status(self, msg: str) -> None:
@@ -1860,6 +1881,7 @@ class ScanlightSidebar(QWidget):
             return
         self._rgb_mode = on
         self.light_body.setVisible(on)
+        self.keep_light_btn.setVisible(on)
         self._rgb_hint.setVisible(not on)
         self.cards_changed.emit()
         if not on:

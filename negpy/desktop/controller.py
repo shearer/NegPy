@@ -8,7 +8,7 @@ from typing import Any, Callable, Collection, Dict, List, Optional, Set, Tuple, 
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import Q_ARG, QFile, QMetaObject, QObject, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import Q_ARG, QMetaObject, QObject, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon, QPixmap, QTransform
 from PyQt6.QtWidgets import QApplication, QCheckBox, QDialog, QMessageBox
 
@@ -17,6 +17,7 @@ from negpy.kernel.system.text import count_of, plural
 from negpy.kernel.image.logic import apply_exif_orientation, working_oetf_encode
 from negpy.desktop.auto_sliders import record_meters
 from negpy.desktop.converters import ImageConverter
+from negpy.desktop.file_manager import move_to_trash
 from negpy.desktop.render_memo import RenderMemo
 from negpy.desktop.session import (
     AppState,
@@ -51,6 +52,7 @@ from negpy.desktop.workers.render import (
     NormalizationInput,
     NormalizationTask,
     NormalizationWorker,
+    PickBetterTask,
     PreviewLoadTask,
     PreviewLoadState,
     PreviewLoadWorker,
@@ -103,7 +105,7 @@ from negpy.domain.models import (
     preset_from_export_config,
     resolve_preset_export,
 )
-from negpy.services.assets.composites import forget_composite, restore_maps
+from negpy.services.assets.composites import forget_composite, restore_maps, source_files
 from negpy.services.assets.triplets import saved_triplets
 from negpy.services.assets import rolls
 from negpy.services.assets.sensor import SensorProfiles
@@ -167,7 +169,14 @@ from negpy.features.geometry.logic import (
     has_manual_crop,
     solve_keystone_from_edges,
 )
-from negpy.features.geometry.models import FINE_ROTATION_LIMIT, AutocropMode, squares_on_arm, with_auto_crop, with_auto_crop_field
+from negpy.features.geometry.models import (
+    FINE_ROTATION_LIMIT,
+    AutocropMode,
+    crops_frame,
+    squares_on_arm,
+    with_auto_crop,
+    with_auto_crop_field,
+)
 from negpy.features.geometry.skew import squared_geometry
 from negpy.features.geometry.processor import CropProcessor, GeometryProcessor
 from negpy.domain.interfaces import PipelineContext
@@ -198,6 +207,16 @@ from negpy.services.assets import semantic_model
 from negpy.kernel.system.paths import get_default_user_dir, get_resource_path
 from negpy.features.retouch.logic import downsample_ir, trace_scratch
 from negpy.features.retouch.models import HEAL_SIZE_MAX, HEAL_SIZE_MIN, RetouchConfig
+from negpy.features.pickbetter.logic import (
+    apply_pick,
+    current_pair,
+    effective_order,
+    move_summary,
+    reject_and_advance,
+    shuffle_order,
+    start_pick_better,
+)
+from negpy.features.pickbetter.models import PICK_PARAMS, PickBetterProgress
 from negpy.features.toning.models import ToningConfig
 from negpy.infrastructure.capture.settings import WhiteCaptureMode
 from negpy.infrastructure.display.color_spaces import ColorSpaceRegistry
@@ -205,7 +224,7 @@ from negpy.infrastructure.filesystem.watcher import FolderWatchService
 from negpy.infrastructure.gpu.device import GPUDevice
 from negpy.infrastructure.gpu.resources import GPUTexture
 from negpy.infrastructure.storage.local_asset_store import LocalAssetStore
-from negpy.kernel.system.config import APP_CONFIG, DEFAULT_WORKSPACE_CONFIG
+from negpy.kernel.system.config import APP_CONFIG, DEFAULT_WORKSPACE_CONFIG, render_scale_factor
 from negpy.kernel.system.logging import get_logger
 from negpy.services.rendering.prefetch_policy import MIN_RAM_RESERVE_BYTES
 from negpy.services.rendering.preview_manager import PreviewManager
@@ -221,12 +240,6 @@ _BUSY_TOAST_MS = 30000
 # Batch owners that share norm_thread (and its CPU) with the background thumbnail
 # refresh — the only ones a running refresh actually needs to get out of the way of.
 _NORM_THREAD_BATCH_OWNERS = frozenset({"autocrop", "normalization"})
-
-
-def _move_to_trash(path: str) -> bool:
-    """False, with the file left in place, when the volume has no Trash."""
-    ok, _trashed = QFile.moveToTrash(path)
-    return bool(ok)
 
 
 # A keep_preview reload (same file, e.g. a mode switch) skips the spinner so a fast
@@ -342,6 +355,7 @@ class _DiscoveryRequest:
     half_frame_profile: Optional[dict] = None  # {crop_rect, split_x, gutter_thickness}
     half_frame_overrides: Optional[dict] = None  # {base_hash: {crop_rect, split_x, gutter_thickness}}
     hot_folder: bool = False
+    skip_paths: frozenset = frozenset()
 
 
 # Sections a scan peek shows itself or that never reach the pixels; an edit to any other section ends the peek.
@@ -474,9 +488,17 @@ class AppController(QObject):
     zone_hover_highlight_changed = pyqtSignal(bool)
     grain_focuser_changed = pyqtSignal(bool)
     printing_notes_changed = pyqtSignal(bool)
+    cursor_probe_changed = pyqtSignal(bool)
+    zones_style_changed = pyqtSignal(str)
+    canvas_info_changed = pyqtSignal(int)
     printing_notes_requested = pyqtSignal()  # the canvas holds the annotated pixels
     strip_requested = pyqtSignal(TestStripTask)
-    test_strip_changed = pyqtSignal(bool)  # True = mosaic is up, False = cleared or building
+    test_strip_changed = pyqtSignal(bool)  # True = mosaic is up, False = cleared
+    pick_better_requested = pyqtSignal(PickBetterTask)
+    pick_better_changed = pyqtSignal(bool)  # True = the window is up, False = cleared
+    pick_better_ready = pyqtSignal(object, object, object)  # (current, left, right ndarrays)
+    pick_better_param = pyqtSignal(str)  # the in-flight parameter name, shown above the Skip caption
+    pick_better_moved = pyqtSignal(str)  # the "Name +delta" summary, shown briefly after a pick
     zone_pins_changed = pyqtSignal()
     rgb_scan_mode_changed = pyqtSignal(bool)  # the mode changed from somewhere other than its button
     half_frame_mode_changed = pyqtSignal(bool)  # a roll became active; each remembers its own toggle
@@ -502,6 +524,7 @@ class AppController(QObject):
     monitor_profile_changed = pyqtSignal()
     compare_changed = pyqtSignal(bool)
     compare_frame_ready = pyqtSignal()
+    compare_hold_changed = pyqtSignal(bool)
     flat_output_changed = pyqtSignal(bool)
     linear_output_changed = pyqtSignal(bool)
     flat_peek_changed = pyqtSignal(bool)
@@ -539,6 +562,8 @@ class AppController(QObject):
     scan_batch_finished = pyqtSignal(list)  # batch: all completed rgb paths
     scan_batch_requested = pyqtSignal(BatchRequest)
     scan_eject_requested = pyqtSignal(str)
+    scan_media_poll_requested = pyqtSignal(str)
+    scan_media_polled = pyqtSignal(str, object)  # device id; True, False, or None where the backend cannot tell
     scan_roll_preview_requested = pyqtSignal(RollPreviewRequest)
     scan_roll_preview_ready = pyqtSignal(object)  # one RollPreview per strip slot
     scan_roll_preview_finished = pyqtSignal()
@@ -766,6 +791,15 @@ class AppController(QObject):
         self._strip_memo = RenderMemo()
         self._strip_memo.large_entries = True
 
+        # The iteration cursor for the active Pick Better session; None when the mode is off.
+        self._pick_better_progress: Optional[PickBetterProgress] = None
+        # Pre-pick (config, progress) snapshots for Undo: each pop re-proposes that pair.
+        self._pick_better_undo: list = []
+        # The Difference slider's A/B spread multiplier, and the scale the last pair rendered at,
+        # so a render that lands after the slider moved can re-request at the new spread.
+        self._pick_better_diff_scale: float = 1.0
+        self._pick_better_request_scale: float = 1.0
+
         self._render_debounce = QTimer()
         self._render_debounce.setSingleShot(True)
         self._render_debounce.setInterval(50)
@@ -923,14 +957,17 @@ class AppController(QObject):
     def _connect_signals(self) -> None:
         self.render_requested.connect(self.render_worker.process)
         self.strip_requested.connect(self.render_worker.build_strip)
+        self.pick_better_requested.connect(self.render_worker.build_pick_better)
         self._render_cleanup_requested.connect(self.render_worker.cleanup)
         self.render_worker.strip_finished.connect(self.on_strip_finished)
+        self.render_worker.pick_better_finished.connect(self.on_pick_better_finished)
         self.render_worker.strip_progress.connect(self.on_strip_progress)
         self.render_worker.busy.connect(self._on_render_busy)
         self.render_worker.finished.connect(self._on_render_finished)
         self.render_worker.metrics_updated.connect(self._on_metrics_updated)
         self.render_worker.error.connect(self._on_render_error)
         self.render_worker.error.connect(self._on_strip_error)
+        self.render_worker.error.connect(self._on_pick_better_error)
 
         self.export_worker.progress.connect(self.export_progress.emit)
         self.export_worker.progress.connect(self._on_batch_progress)
@@ -1024,6 +1061,8 @@ class AppController(QObject):
         self.scan_requested.connect(self.scan_worker.run_scan)
         self.scan_batch_requested.connect(self.scan_worker.run_batch)
         self.scan_eject_requested.connect(self.scan_worker.eject)
+        self.scan_media_poll_requested.connect(self.scan_worker.poll_media)
+        self.scan_worker.media_polled.connect(self.scan_media_polled.emit)
         self.scan_worker.cancelled.connect(self.scan_cancelled.emit)
         self.scan_worker.frame_done.connect(self._on_scan_frame_done)
         self.scan_worker.batch_finished.connect(self._on_scan_batch_finished)
@@ -1616,6 +1655,7 @@ class AppController(QObject):
             half_frame_profile=self.half_frame_profile(),
             half_frame_overrides=self.half_frame_overrides(),
             hot_folder=hot_folder,
+            skip_paths=rolls.excluded_paths(self.session.repo, [p for p in paths if os.path.isdir(p)]),
         )
         if self._discovery_running:
             self._pending_asset_discoveries.append(request)
@@ -1670,6 +1710,7 @@ class AppController(QObject):
             restore_hdr=merges,
             half_frame_profile=request.half_frame_profile,
             half_frame_overrides=request.half_frame_overrides,
+            skip_paths=request.skip_paths,
         )
         self.asset_discovery_requested.emit(task)
 
@@ -2384,7 +2425,12 @@ class AppController(QObject):
         # Files appended (not replaced) while a roll is active join its membership, so
         # reopening that roll later still shows what was added by hand.
         if not replace_existing and self.state.active_roll_id:
-            rolls.add_extra_members(self.session.repo, self.state.active_roll_id, [a["path"] for a in valid_assets if a.get("path")])
+            rolls.add_extra_members(
+                self.session.repo,
+                self.state.active_roll_id,
+                [a["path"] for a in valid_assets if a.get("path")],
+                parts=[p for a in valid_assets for p in source_files(a)],
+            )
         pending_scan = getattr(self, "_pending_scanned_file", None)
 
         if replace_existing and valid_assets:
@@ -3137,6 +3183,12 @@ class AppController(QObject):
         self.state.zones_overlay = (not self.state.zones_overlay) if force is None else bool(force)
         self.zones_overlay_changed.emit(self.state.zones_overlay)
 
+    def set_zones_style(self, style: str) -> None:
+        """Zone Overlay look, a ZONE_STYLES key. Repaint only."""
+        self.state.zones_style = style
+        self.session.repo.save_global_setting("zones_style", style)
+        self.zones_style_changed.emit(style)
+
     def toggle_clipping_overlay(self, force: Optional[bool] = None) -> None:
         """Marks paper black and paper white on the frame. Repaint only."""
         self.state.clipping_overlay = (not self.state.clipping_overlay) if force is None else bool(force)
@@ -3151,9 +3203,14 @@ class AppController(QObject):
         self.zone_hover_highlight_changed.emit(on)
 
     def set_zone_highlight(self, zone: Optional[int]) -> None:
-        """Lights up one zone-strip cell's pixels on the frame; None clears. Repaint only."""
+        """Shows one zone-strip cell's zone alone, if the strip's Zone Highlight is on; None
+        clears. Repaint only."""
         if zone is not None and not self.state.zone_hover_highlight:
             return
+        self.highlight_zone(zone)
+
+    def highlight_zone(self, zone: Optional[int]) -> None:
+        """Shows one zone alone, whatever the strip's setting; None clears. Repaint only."""
         if zone != self.state.zone_highlight:
             self.state.zone_highlight = zone
             self.zone_highlight_changed.emit()
@@ -3163,6 +3220,25 @@ class AppController(QObject):
         holds, so no re-render is needed."""
         self.state.grain_focuser = (not self.state.grain_focuser) if force is None else bool(force)
         self.grain_focuser_changed.emit(self.state.grain_focuser)
+
+    def toggle_cursor_probe(self, force: Optional[bool] = None) -> None:
+        """Densitometer chip beside the pointer. Repaint only."""
+        on = (not self.state.cursor_probe) if force is None else bool(force)
+        self.state.cursor_probe = on
+        self.session.repo.save_global_setting("cursor_probe", on)
+        self.cursor_probe_changed.emit(on)
+
+    def set_canvas_info_level(self, level: int) -> None:
+        """Canvas corner pills: off, basic or full."""
+        self.state.canvas_info_level = level % 3
+        self.session.repo.save_global_setting("canvas_info_level", self.state.canvas_info_level)
+        self.canvas_info_changed.emit(self.state.canvas_info_level)
+
+    def cycle_canvas_info(self) -> None:
+        from negpy.desktop.view.canvas.hud import INFO_LEVEL_LABELS
+
+        self.set_canvas_info_level(self.state.canvas_info_level + 1)
+        self.set_status(f"Frame Info: {INFO_LEVEL_LABELS[self.state.canvas_info_level]}", 1500)
 
     def toggle_printing_notes(self, force: Optional[bool] = None) -> None:
         """Printing-notes overlay (dodge/burn map + print recipe). Repaint only — every
@@ -3586,6 +3662,171 @@ class AppController(QObject):
         self._clear_test_strip()
         self.session.update_config(replace(self.state.config, exposure=new_exposure), persist=True)
         self.request_render()
+
+    def _request_pick_better_pair(self) -> None:
+        """Render the in-flight pair plus the committed edit and show all three in the Pick Better window.
+
+        The two-up replaces the frame, so a real render drops it like the test strip; each pick
+        re-requests the next pair, so the mode never renders a plain frame between picks.
+        """
+        if self.state.preview_raw is None or self._pick_better_progress is None:
+            return
+        progress = self._pick_better_progress
+        real = effective_order(progress)[progress.param_index]
+        left, right = current_pair(self.state.config, progress, scale=self._pick_better_diff_scale)
+        # Record the spread this render ran at, so a render that lands after the Difference slider
+        # moved can re-request at the new spread instead of showing a stale pair.
+        self._pick_better_request_scale = self._pick_better_diff_scale
+        self.pick_better_param.emit(f"Round {progress.round_number} · {PICK_PARAMS[real].name}")
+        cam_xyz, camera_wb = self._effective_cam_xyz()
+        self.state.pick_better_pending = True
+        self.set_status("Printing Pick Better…", 2500)
+        self.status_progress_requested.emit(0, 2)
+        self.pick_better_requested.emit(
+            PickBetterTask(
+                buffer=self.state.preview_raw,
+                source_hash=self.state.current_file_hash or "preview",
+                preview_size=float(APP_CONFIG.preview_render_size),
+                current_config=self.state.config,
+                left_config=left,
+                right_config=right,
+                gpu_enabled=self.state.gpu_enabled,
+                ir_buffer=self.state.preview_ir,
+                detect_buffer=self.state.preview_detect,
+                cam_xyz=cam_xyz,
+                camera_wb=camera_wb,
+            )
+        )
+
+    def toggle_pick_better(self, force: Optional[bool] = None) -> None:
+        """Print (or clear) the Pick Better two-up.
+
+        Entering starts the fixed sequence and then the endless refinement; a pick commits
+        one field and proposes the next pair. The Finish button or this toggle ends it.
+        """
+        showing = self.state.pick_better or self.state.pick_better_pending
+        target = (not showing) if force is None else bool(force)
+        if not target:
+            self._clear_pick_better()
+            return
+        if self.state.preview_raw is None:
+            return
+        self.exit_compare()
+        self._pick_better_progress = start_pick_better(self.state.config)
+        self._request_pick_better_pair()
+
+    def _clear_pick_better(self) -> None:
+        """Drop the two-up and its cursor; silent when there was nothing up."""
+        if not (self.state.pick_better or self.state.pick_better_pending):
+            return
+        if self.state.pick_better_pending:
+            self.status_progress_requested.emit(0, 0)  # total <= 0 hides the bar
+        self.state.pick_better = False
+        self.state.pick_better_pending = False
+        self._pick_better_progress = None
+        self._pick_better_undo.clear()
+        self.pick_better_changed.emit(False)
+
+    def on_pick_better_finished(self, current: Any, left: Any, right: Any) -> None:
+        if not self.state.pick_better_pending:
+            return
+        self.state.pick_better_pending = False
+        # The user may have moved the Difference slider while this render was in flight, so the
+        # frame shows the old spread. Re-request at the new spread and drop this stale one; a
+        # settled frame is shown, and the window appears only on the first finish.
+        if self._pick_better_diff_scale != self._pick_better_request_scale:
+            self._request_pick_better_pair()
+            return
+        already_up = self.state.pick_better
+        self.state.pick_better = True
+        self.pick_better_ready.emit(current, left, right)
+        if not already_up:
+            self.pick_better_changed.emit(True)
+        self.set_status("Pick Better ready — click the better candidate", 4000)
+
+    def pick_better_select(self, side: int) -> None:
+        """Commit the chosen candidate's field, then propose the next pair.
+
+        A pick never ends the session: the user ends via the Finish button or the toggle, so every
+        pick advances the cursor and re-renders the next pair.
+        """
+        if not self.state.pick_better or self._pick_better_progress is None:
+            return
+        self._pick_better_undo.append((self.state.config, self._pick_better_progress))
+        old = self.state.config
+        progress = self._pick_better_progress
+        new_config, next_progress = apply_pick(old, progress, side, scale=self._pick_better_diff_scale)
+        self.session.update_config(new_config, persist=True)
+        self._pick_better_progress = next_progress
+        self.pick_better_moved.emit(move_summary(old, new_config, progress))
+        self._request_pick_better_pair()
+
+    def pick_better_reject(self) -> None:
+        """Reject both candidates (keep the middle current photo) and advance to the next parameter.
+
+        A reject is not a selection: the config and the selection counts stay put, so the next
+        parameter's first round still opens at its bold step.
+        """
+        if not self.state.pick_better or self._pick_better_progress is None:
+            return
+        self._pick_better_undo.append((self.state.config, self._pick_better_progress))
+        _, next_progress = reject_and_advance(self.state.config, self._pick_better_progress)
+        self._pick_better_progress = next_progress
+        self._request_pick_better_pair()
+
+    def pick_better_finish(self) -> None:
+        """End Pick Better, leaving the committed config as the final edit."""
+        if not (self.state.pick_better or self.state.pick_better_pending):
+            return
+        self._clear_pick_better()
+        self.request_render()
+
+    def pick_better_undo(self) -> None:
+        """Revert the last pick and re-propose the pair it was chosen from.
+
+        The pair is deterministic from (config, progress), so restoring both reproduces the exact
+        two candidates; the current-edit preview reflects the restored config.
+        """
+        if not self.state.pick_better or not self._pick_better_undo:
+            return
+        config, progress = self._pick_better_undo.pop()
+        self.session.update_config(config, persist=True)
+        self._pick_better_progress = progress
+        self._request_pick_better_pair()
+
+    def pick_better_set_diff(self, scale: float) -> None:
+        """Scale the A/B spread live. A render already in flight re-requests on finish, so the
+        new spread is shown without waiting for a pick; a settled pair re-renders at once."""
+        self._pick_better_diff_scale = scale
+        if self._pick_better_progress is not None and not self.state.pick_better_pending:
+            self._request_pick_better_pair()
+
+    def pick_better_set_route(self, param_order: tuple[int, ...], randomize: bool) -> None:
+        """Apply the Custom Routing window's route: set the round order and the randomize choice,
+        then re-request the in-flight pair so the new order shows at once.
+
+        The route is the randomize-off order the drag-and-drop sets; turning randomize on shuffles
+        a copy into randomize_order and leaves the route untouched, so turning it off restores it.
+        """
+        if self._pick_better_progress is None or not (self.state.pick_better or self.state.pick_better_pending):
+            return
+        progress = self._pick_better_progress
+        randomize_order = shuffle_order() if randomize else progress.randomize_order
+        self._pick_better_progress = replace(progress, param_order=tuple(param_order), randomize=randomize, randomize_order=randomize_order)
+        self._request_pick_better_pair()
+
+    def pick_better_route(self) -> tuple[tuple[int, ...], bool]:
+        """The current round order and randomize choice, to seed the Custom Routing window."""
+        progress = self._pick_better_progress
+        if progress is None:
+            return tuple(range(len(PICK_PARAMS))), False
+        return progress.param_order, progress.randomize
+
+    def _on_pick_better_error(self, _message: str) -> None:
+        """A render that errors never reaches on_pick_better_finished, and the stuck `pending`
+        flag holds the progress bar open and blocks a reprint."""
+        if self.state.pick_better_pending:
+            self._clear_pick_better()
 
     def handle_crop_rect_changed(self, nx1: float, ny1: float, nx2: float, ny2: float, persist: bool) -> None:
         """Live-updates (persist=False) or commits (persist=True) the manual crop rect
@@ -5753,6 +5994,10 @@ class AppController(QObject):
         """Trigger the scanner's eject action on the worker thread."""
         self.scan_eject_requested.emit(device_id)
 
+    def poll_scanner_media(self, device_id: str) -> None:
+        """Ask on the worker thread whether film is loaded (result via scan_media_polled)."""
+        self.scan_media_poll_requested.emit(device_id)
+
     def cancel_scan(self) -> None:
         self.scan_worker.cancel()
 
@@ -5884,6 +6129,35 @@ class AppController(QObject):
                 mergeable.append(i)
         return mergeable, skipped
 
+    def move_frames_to_trash(self, indices: list[int]) -> None:
+        """Move each plain frame's file and its sidecar to the Trash and unload it. A file the
+        Trash refuses stays loaded. Edits stay in the database, so a restored file finds its edit."""
+        frames = [(i, self.state.uploaded_files[i]) for i in indices if 0 <= i < len(self.state.uploaded_files)]
+        if not frames or any(composite_kind(f) for _, f in frames):
+            return
+        self.session.save_active_edit()
+        trashed: list[int] = []
+        errors: list[str] = []
+        for i, f in frames:
+            path = f["path"]
+            if os.path.exists(path) and (error := move_to_trash(path)):
+                errors.append(error)
+                logger.warning("Move to Trash could not move %s: %s", path, error)
+                continue
+            sidecar = sidecar_path_for(path)
+            if os.path.exists(sidecar) and (error := move_to_trash(sidecar)):
+                errors.append(error)
+                logger.warning("Move to Trash could not move the sidecar %s: %s", sidecar, error)
+            trashed.append(i)
+        self.session.remove_files(trashed)
+        if errors:
+            message = f"{count_of(len(errors), 'file')} could not go to the Trash: {errors[0]}"
+            if trashed:
+                message = f"Moved {count_of(len(trashed), 'frame')} to the Trash, {message}"
+            self.set_status(message, 8000, kind="warning")
+        else:
+            self.set_status(f"Moved {count_of(len(trashed), 'frame')} to the Trash", 4000)
+
     def request_frame_merge(self, paths: list[str], trash: bool) -> None:
         """With *trash*, the sources go to the Trash once the edit has moved. Paths, not indices:
         a discovery during the confirm dialog can shift the indices."""
@@ -5983,9 +6257,9 @@ class AppController(QObject):
                 replacements[index_by_path[primary]] = new_asset
             if self._frame_merge_trash:
                 for path in (primary, *parts, *sidecars):
-                    if os.path.exists(path) and not _move_to_trash(path):
+                    if os.path.exists(path) and (error := move_to_trash(path)):
                         kept += 1
-                        logger.warning("Merge to TIFF Negative could not move %s to the Trash", path)
+                        logger.warning("Merge to TIFF Negative could not move %s to the Trash: %s", path, error)
         if self._frame_merge_trash:
             self.session.replace_assets(replacements)
         else:
@@ -6279,6 +6553,32 @@ class AppController(QObject):
         if forked_hash == self.state.current_file_hash:
             self._reselect_active_frame()
         self.set_status("Reverted to this roll's shared edit", 3000)
+
+    def roll_removal(self, indices: List[int]) -> List[int]:
+        """Every loaded frame that goes when the frames at *indices* leave the roll: a
+        composite's files and both halves of a half-frame scan go together."""
+        files = self.state.uploaded_files
+        picked = [files[i] for i in indices if 0 <= i < len(files)]
+        gone = {p for a in picked for p in source_files(a)}
+        return [i for i, a in enumerate(files) if a.get("path") in gone] if self.state.active_roll_id else []
+
+    def request_remove_from_roll(self, indices: List[int]) -> None:
+        """Take the frames at *indices* out of the active roll and the Film Strip, with
+        their locks, scenes and forks in that roll."""
+        roll_id = self.state.active_roll_id
+        drop = self.roll_removal(indices)
+        if not roll_id or not drop:
+            return
+        frames = [self.state.uploaded_files[i] for i in drop]
+        paths = list(dict.fromkeys(p for a in frames for p in source_files(a)))
+        hashes = [rolls.unforked_hash(a["hash"]) for a in frames]
+        forked = rolls.remove_members(self.session.repo, roll_id, paths, hashes)
+        # After the unload: leaving the active frame saves its edit, which would write a fork back.
+        self.session.remove_files(drop)
+        for from_hash in forked:
+            self.session.repo.delete_file_settings(rolls.roll_edit_hash(from_hash, roll_id))
+        self.session.files_changed.emit()
+        self.set_status(f"Removed {count_of(len(drop), 'frame')} from the roll", 3000)
 
     def _reselect_active_frame(self) -> None:
         """Re-enter the active frame after its hash changed, so edits save under the new
@@ -6802,6 +7102,31 @@ class AppController(QObject):
             self.state.compare_mode = False
             self.compare_changed.emit(False)
 
+    def begin_compare_hold(self) -> None:
+        """Show the baseline over the whole picture until end_compare_hold. Only over the print:
+        a peek, the test strip or an uncropped tool view has no baseline that lines up."""
+        st = self.state
+        if (
+            st.preview_raw is None
+            or st.test_strip
+            or st.negative_peek
+            or st.flat_peek
+            or st.embedded_peek
+            or st.flatfield_peek
+            or st.active_tool in UNCROPPED_PREVIEW_TOOLS
+        ):
+            return
+        st.compare_hold = True
+        # Kept after release, so the next hold on this frame needs no render.
+        if not isinstance(st.compare_before, np.ndarray) or st.compare_before_key != self._compare_before_key():
+            self._request_compare_baseline()
+        self.compare_hold_changed.emit(True)
+
+    def end_compare_hold(self) -> None:
+        if self.state.compare_hold:
+            self.state.compare_hold = False
+            self.compare_hold_changed.emit(False)
+
     def toggle_compare(self) -> None:
         """Toggle the before/after split between the edit and the auto baseline."""
         if self.state.preview_raw is None:
@@ -6919,6 +7244,17 @@ class AppController(QObject):
         else:
             self.request_render()
 
+    def _peek_context(self, source: np.ndarray) -> PipelineContext:
+        """A geometry-only context scaled from the buffer the peek crops, as the render scales its own."""
+        height, width = source.shape[:2]
+        return PipelineContext(
+            original_size=(height, width),
+            scale_factor=render_scale_factor(source.shape),
+            process_mode=self.state.config.process.process_mode,
+            crop_preview_full=self.state.active_tool in UNCROPPED_PREVIEW_TOOLS,
+            wants_uv_grid=False,
+        )
+
     def _paint_negative_peek(self) -> None:
         """Put the decoded source on the canvas: un-inverted, un-normalized, no tone edits.
 
@@ -6945,14 +7281,7 @@ class AppController(QObject):
         if source is None:
             return
         geometry = self.state.config.geometry
-        original = self.state.original_res if any(self.state.original_res) else source.shape[:2]
-        context = PipelineContext(
-            original_size=(original[0], original[1]),
-            scale_factor=max(original) / float(APP_CONFIG.preview_render_size),
-            process_mode=self.state.config.process.process_mode,
-            crop_preview_full=self.state.active_tool in UNCROPPED_PREVIEW_TOOLS,
-            wants_uv_grid=False,
-        )
+        context = self._peek_context(source)
         img = GeometryProcessor(geometry).process(source, context)
         process = self.state.config.process
         decoded_without_wb = effective_linear_raw(process) and not highlight_reconstruction_bakes_wb(process)
@@ -7027,21 +7356,13 @@ class AppController(QObject):
         clipping, and none of NegPy's decode. Nothing is measured from it: the analysis chart
         keeps reading the frame's own metrics.
 
-        Geometry runs against the preview's own pixel grid, which is not the raw's, so the
-        context is built from its shape rather than `original_res`.
+        Geometry runs against the preview's own pixel grid, which is not the raw's.
         """
         source = self._load_embedded_preview()
         if source is None:
             return
         geometry = self.state.config.geometry
-        height, width = source.shape[:2]
-        context = PipelineContext(
-            original_size=(height, width),
-            scale_factor=max(height, width) / float(APP_CONFIG.preview_render_size),
-            process_mode=self.state.config.process.process_mode,
-            crop_preview_full=self.state.active_tool in UNCROPPED_PREVIEW_TOOLS,
-            wants_uv_grid=False,
-        )
+        context = self._peek_context(source)
         img = GeometryProcessor(geometry).process(source, context)
         if not context.crop_preview_full:
             img = CropProcessor(geometry).process(img, context)
@@ -8057,7 +8378,7 @@ class AppController(QObject):
         # The baseline half of the split is stashed, never displayed: it must not reach
         # last_metrics, the memo, the thumbnail or the canvas.
         if metrics.get("compare"):
-            if self.state.compare_mode:
+            if self.state.compare_mode or self.state.compare_hold:
                 self._capture_compare_before(metrics)
             if self._pending_render_task is not None:
                 self._dispatch_pending_render()
@@ -8093,6 +8414,7 @@ class AppController(QObject):
             self.state.last_metrics["splash"] = False
 
         self._freeze_resolved_auto_crop(metrics)
+        self._freeze_resolved_meter(metrics)
         record_meters(self.state.auto_meters, self.state.current_file_hash or "", metrics)
 
         result = metrics.get("base_positive")
@@ -8184,6 +8506,28 @@ class AppController(QObject):
         self.session.update_config(replace(self.state.config, geometry=new_geo), persist=True, render=False, record_history=False)
         self._carry_render_identity(before)
         self.config_updated.emit()
+
+    def _freeze_resolved_meter(self, metrics: Dict[str, Any]) -> None:
+        """Store the meter rect this render resolved, so nothing detects it a second time. The render
+        metered inside it, so bounds stored from before it are dropped; no render is requested."""
+        box = metrics.get("meter_resolved")
+        # Like measured bounds: a proxy or one diptych half is not this frame's picture.
+        if box is None or metrics.get("ephemeral") or metrics.get("interactive") or metrics.get("diptych"):
+            return
+        geom, proc = self.state.config.geometry, self.state.config.process
+        if crops_frame(geom) or geom.crop_from_auto or proc.analysis_rect is not None:
+            return
+        if autocrop_detection_key(geom) != box.geometry_key or proc.meter_key == box.key:
+            return
+        stale = invalidate_local_bounds(proc) if box.rect != proc.meter_rect else {}
+        before = self.state.config
+        self.session.update_config(
+            replace(before, process=replace(proc, meter_rect=box.rect, meter_key=box.key, **stale)),
+            persist=self._may_persist_measured_bounds(),
+            render=False,
+            record_history=False,
+        )
+        self._carry_render_identity(before)
 
     def _carry_render_identity(self, before: WorkspaceConfig) -> None:
         """Call after a write that leaves the pixels as they are. Identity, not equality: an edit since the render breaks the chain."""

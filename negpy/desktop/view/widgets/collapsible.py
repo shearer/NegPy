@@ -103,10 +103,11 @@ class CollapsibleSection(QWidget):
             self.select_box.clicked.connect(self._on_select_clicked)
             btn_layout.addWidget(self.select_box)
 
+        self.icon_label: Optional[QLabel] = None
         if icon:
-            icon_label = QLabel()
-            icon_label.setPixmap(icon.pixmap(14, 14))
-            btn_layout.addWidget(icon_label)
+            self.icon_label = QLabel()
+            self.icon_label.setPixmap(icon.pixmap(14, 14))
+            btn_layout.addWidget(self.icon_label)
 
         self.title_label = QLabel(self._title_text)
         self.title_label.setStyleSheet(

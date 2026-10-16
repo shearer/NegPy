@@ -30,6 +30,10 @@ def _make_toolbar() -> ActionToolbar:
     controller.session.state.clipping_overlay = False
     controller.session.state.printing_notes = False
     controller.session.state.grain_focuser = False
+    controller.session.state.cursor_probe = False
+    controller.session.state.canvas_info_level = 1
+    controller.session.state.zones_style = "false_color"
+    controller.session.state.color_vision = "standard"
     controller.session.state.active_tool = ToolMode.NONE
     controller.session.state.clone_picking = False
     controller.session.state.selected_file_idx = 0
@@ -773,3 +777,39 @@ class TestToolsMenu(unittest.TestCase):
         tb = _make_toolbar()
         submenu = next(a.menu() for a in tb.btn_overflow.menu().actions() if a.menu() is not None and a.text() == "Tools")
         self.assertEqual(len(self._items(submenu)), len(self._items(tb.btn_tools.choice_menu)))
+
+
+class TestZoneRow(unittest.TestCase):
+    def _rows(self, tb: ActionToolbar) -> tuple[bool, bool, bool]:
+        return (not tb._view_row.isHidden(), not tb._tool_row.isHidden(), not tb._zone_row.isHidden())
+
+    def test_zone_overlay_swaps_in_its_row_and_an_armed_tool_outranks_it(self):
+        tb = _make_toolbar()
+        state = tb.session.state
+        state.zones_overlay = True
+        tb._sync_tool_row()
+        self.assertEqual(self._rows(tb), (False, False, True))
+        self.assertEqual(tb.zone_style.currentData(), "false_color")
+
+        state.active_tool = ToolMode.CROP_MANUAL
+        tb._sync_tool_row()
+        self.assertEqual(self._rows(tb), (False, True, False))
+
+        state.active_tool = ToolMode.NONE
+        state.zones_overlay = False
+        tb._sync_tool_row()
+        self.assertEqual(self._rows(tb), (True, False, False))
+
+    def test_zone_row_closes_and_switches_the_look(self):
+        tb = _make_toolbar()
+        tb.btn_zone_close.click()
+        tb.controller.toggle_zones_overlay.assert_called_with(force=False)
+        tb.zone_style.setCurrentIndex(1)
+        tb.controller.set_zones_style.assert_called_with("zone_map")
+        tb.zone_style.setCurrentIndex(2)
+        tb.controller.set_zones_style.assert_called_with("grid")
+
+    def test_legend_hover_highlights_whatever_the_strip_setting(self):
+        tb = _make_toolbar()
+        tb.zone_legend.zone_hovered.emit(6)
+        tb.controller.highlight_zone.assert_called_with(6)

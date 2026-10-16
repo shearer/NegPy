@@ -4,6 +4,7 @@ from typing import Optional
 import numpy as np
 from PIL import Image
 from PyQt6.QtCore import QByteArray, Qt, QEvent, QTimer, pyqtSignal
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -22,12 +23,15 @@ from negpy.desktop.controller import AppController
 from negpy.desktop.session import ToolMode
 from negpy.infrastructure.loaders.constants import SUPPORTED_RAW_EXTENSIONS
 from negpy.desktop.converters import ImageConverter
+from negpy.desktop.view.canvas.hud import INFO_FULL, frame_info
 from negpy.desktop.view.canvas.reference_pane import ReferencePane
-from negpy.desktop.view.canvas.toolbar import ActionToolbar
+from negpy.desktop.view.canvas.toolbar import ActionToolbar, frame_position
 from negpy.desktop.view.canvas.widget import ImageCanvas
 from negpy.desktop.view.keyboard_shortcuts import SpacePanKeyFilter, setup_keyboard_shortcuts
 from negpy.desktop.view.mac_menu_bar import install_mac_menus
 from negpy.desktop.view.shortcut_registry import tooltip_with_shortcut
+from negpy.desktop.view.sidebar.custom_routing_dialog import CustomRoutingDialog
+from negpy.desktop.view.sidebar.pick_better_window import PickBetterWindow
 from negpy.desktop.view.sidebar.right_panel import RightPanel
 from negpy.desktop.view.sidebar.session_panel import SessionPanel
 from negpy.desktop.view.styles.templates import hint_label, labeled_action
@@ -147,6 +151,7 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         self._init_ui()
+        self._pick_better_window = PickBetterWindow(self, repo=self.controller.session.repo)
         self._connect_signals()
         self.shortcut_manager = setup_keyboard_shortcuts(self)
         self.space_pan_filter = SpacePanKeyFilter(self)
@@ -605,15 +610,32 @@ class MainWindow(QMainWindow):
         self.controller.crop_guide_changed.connect(self.canvas.overlay.update)
         self.controller.dust_overlay_changed.connect(self.canvas.overlay.update)
         self.controller.zones_overlay_changed.connect(lambda _on: self.canvas.overlay.update())
+        self.controller.zones_style_changed.connect(lambda _style: self.canvas.overlay.update())
+        self.canvas.overlay.zone_shares_changed.connect(self.toolbar.set_zone_shares)
+        self.canvas.overlay.zone_pointer_changed.connect(self.toolbar.set_zone_pointer)
         self.controller.clipping_overlay_changed.connect(lambda _on: self.canvas.overlay.update())
         self.controller.zone_highlight_changed.connect(self.canvas.overlay.update)
         self.controller.grain_focuser_changed.connect(lambda _on: self.canvas.overlay.update())
         self.controller.printing_notes_changed.connect(lambda _on: self.canvas.overlay.update())
+        self.controller.cursor_probe_changed.connect(lambda _on: self.canvas.overlay.update())
+        self.controller.densitometer_readout.connect(self.canvas.overlay.set_probe_reading)
+        self.controller.canvas_info_changed.connect(lambda _level: self._refresh_image_info())
         self.controller.printing_notes_requested.connect(self._save_printing_notes)
         self.controller.compare_frame_ready.connect(self.canvas.refresh_compare)
         self.controller.compare_changed.connect(lambda _on: self.canvas.refresh_compare())
+        self.controller.compare_hold_changed.connect(lambda _on: self.canvas.overlay.update())
         self.controller.test_strip_changed.connect(lambda _up: self.canvas.overlay.on_test_strip_changed())
         self.canvas.test_strip_picked.connect(self.controller.apply_test_strip_pick)
+        self.controller.pick_better_changed.connect(self._on_pick_better_changed)
+        self.controller.pick_better_ready.connect(self._on_pick_better_ready)
+        self._pick_better_window.picked.connect(self.controller.pick_better_select)
+        self._pick_better_window.rejected.connect(self.controller.pick_better_reject)
+        self._pick_better_window.undoRequested.connect(self.controller.pick_better_undo)
+        self._pick_better_window.closed.connect(self.controller.pick_better_finish)
+        self.controller.pick_better_param.connect(self._pick_better_window.set_param_name)
+        self.controller.pick_better_moved.connect(self._pick_better_window.show_move)
+        self._pick_better_window.diffChanged.connect(self.controller.pick_better_set_diff)
+        self._pick_better_window.customRoutingClicked.connect(self._on_custom_routing_clicked)
         self.controller.local_drag_changed.connect(self.canvas.overlay.set_local_slider_drag)
         self.controller.zone_pins_changed.connect(self.canvas.overlay.update)
         self.controller.zone_arm_changed.connect(self._on_zone_armed)
@@ -626,6 +648,37 @@ class MainWindow(QMainWindow):
         self.controller.batch_progress.connect(self.progress_dialog.set_progress)
         self.controller.batch_finished.connect(self.progress_dialog.finish)
         self.progress_dialog.abort_requested.connect(self.controller.abort_active_batch)
+
+    def _on_pick_better_changed(self, up: bool) -> None:
+        """Show the separate Pick Better window while the mode is active; hide it when it ends."""
+        if not up:
+            self._pick_better_window.hide()
+            return
+        self._pick_better_window.size_and_center_to(self)
+        self._pick_better_window.show()
+        self._pick_better_window.raise_()
+
+    def _on_pick_better_ready(self, current, left, right) -> None:
+        """Render the three committed frames to QPixmaps and push them onto the window's labels."""
+        display_cs, monitor, proof = self.controller.display_transform_params(proofed=True)
+        self._pick_better_window.set_images(
+            self._to_pick_better_pixmap(current, display_cs, monitor, proof),
+            self._to_pick_better_pixmap(left, display_cs, monitor, proof),
+            self._to_pick_better_pixmap(right, display_cs, monitor, proof),
+        )
+
+    def _on_custom_routing_clicked(self) -> None:
+        """Open the Custom Routing window seeded with the current route; on Apply, commit it."""
+        order, randomize = self.controller.pick_better_route()
+        dialog = CustomRoutingDialog(self, order, randomize, repo=self.controller.session.repo)
+        if dialog.exec():
+            self.controller.pick_better_set_route(dialog.route(), dialog.randomize_on())
+
+    @staticmethod
+    def _to_pick_better_pixmap(arr, display_cs, monitor, proof) -> QPixmap:
+        """One rendered frame (read back from the worker) through the display transform, as a QPixmap."""
+        qimage = ImageConverter.to_qimage(np.ascontiguousarray(arr, dtype=np.float32), display_cs, monitor, proof)
+        return QPixmap.fromImage(qimage)
 
     def _on_batch_started(self, title: str, abortable: bool) -> None:
         """Hot Folder polls every 2 s, so its per-frame import batches (the only
@@ -736,22 +789,38 @@ class MainWindow(QMainWindow):
 
     def _refresh_image_info(self) -> None:
         """Updates the canvas HUD corner pills."""
-        if not self.state.current_file_path:
+        st = self.state
+        if not st.current_file_path:
             self.canvas.hud.set_zoom_note("")
-            self.canvas.hud.update_info("", "", "", "")
+            self.canvas.hud.update_info("", "", "")
             return
-
-        filename = os.path.basename(self.state.current_file_path)
-        w, h = self.state.original_res
-        res_str = f"{w} x {h} px"
-
-        mode_str = str(self.state.config.process.process_mode)
-        edits_str = f"Edits: {self.state.undo_index}"
-
-        self.canvas.hud.update_info(filename, res_str, mode_str, edits_str)
+        w, h = st.original_res
+        proof = os.path.splitext(os.path.basename(st.proof_icc_path))[0] if st.soft_proof_enabled and st.proof_icc_path else ""
+        self.canvas.hud.update_info(
+            *frame_info(
+                st.canvas_info_level,
+                st.config,
+                os.path.basename(st.current_file_path),
+                f"{w} x {h} px",
+                str(st.config.process.process_mode),
+                frame_position(self.controller.session.asset_model, st.selected_file_idx),
+                proof,
+            )
+        )
+        self._on_zoom_info_changed(self.canvas.zoom_level)
 
     def _on_zoom_info_changed(self, zoom: float) -> None:
-        self.canvas.hud.set_zoom_note(self.canvas.zoom_note())
+        """The zoom readout: under the navigator while it is up, else the bottom-right pill."""
+        if not self.state.current_file_path:
+            return
+        note = self.canvas.zoom_note()
+        percent = f"{self.canvas.current_zoom_percent()}%"
+        if not self.canvas.navigator.isHidden():
+            self.canvas.navigator.set_caption(" · ".join(s for s in (percent, note) if s))
+            self.canvas.hud.set_zoom_note("")
+            return
+        full = self.state.canvas_info_level == INFO_FULL
+        self.canvas.hud.set_zoom_note(" · ".join(s for s in (percent if full else "", note) if s))
 
     def _on_export_progress(self, current: int, total: int, filename: str) -> None:
         self.canvas.hud.set_progress(current, total)

@@ -944,7 +944,7 @@ class VectorscopeWidget(QWidget):
 
 
 class ZoneStripWidget(QWidget):
-    """Print-zone occupancy strip (0 to IX), opacity square-root scaled so a small mass reads.
+    """Print-zone occupancy strip (0 to X), opacity square-root scaled so a small mass reads.
     A cell click asks for that zone and the next photo click places a tone there. A double-click
     toggles the Zone Overlay, so a single click waits out the double-click interval."""
 
@@ -952,7 +952,7 @@ class ZoneStripWidget(QWidget):
     zone_double_clicked = pyqtSignal()
     zone_hovered = pyqtSignal(object)
 
-    _LABELS = ("0", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX")
+    _LABELS = ("0", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X")
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1063,7 +1063,7 @@ class ZoneStripWidget(QWidget):
                 tone = 40 + int(215 * i / (n - 1))
                 alpha = int(min(1.0, np.sqrt(frac)) * 235)
                 painter.fillRect(x0, 0, x1 - x0, h, QColor(tone, tone, tone, alpha))
-                if (shadow_warn and i <= 1) or (highlight_warn and i == n - 1):
+                if (shadow_warn and i <= 1) or (highlight_warn and i >= n - 2):
                     painter.fillRect(x0, 0, x1 - x0, h, _alpha(THEME.clip_warning, 90))
                 armed = i == self._armed
                 painter.setPen(QPen(QColor(THEME.accent_primary) if armed else _alpha(THEME.text_hint, 160)))

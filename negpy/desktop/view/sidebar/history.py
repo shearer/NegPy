@@ -1,6 +1,6 @@
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QInputDialog, QListWidget, QListWidgetItem, QMenu, QMessageBox
+from PyQt6.QtWidgets import QHBoxLayout, QInputDialog, QListWidget, QListWidgetItem, QMenu, QMessageBox, QVBoxLayout
 
 from negpy.desktop.view.confirm import confirm_delete_named
 from negpy.desktop.view.shortcut_registry import tooltip_with_shortcut
@@ -32,7 +32,24 @@ class HistoryPanel(BaseSidebar):
         self.work_prints.setToolTip(_WORK_PRINT_TOOLTIP)
         self.work_prints.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.work_prints.setMaximumHeight(120)
-        self.layout.addWidget(self.work_prints, 0)
+
+        # Global setting, default off; the toggle stays in view even when the print list is empty.
+        self.apply_metadata_btn = self._labeled_toggle(
+            "",
+            "Load Metadata",
+            self.controller.session.work_print_apply_metadata(),
+            "When a work print loads, restore its saved metadata. Off (the default) keeps the metadata on screen now.",
+        )
+        # The list and its toggle share one box: the toggle sits at the list's bottom-right.
+        box = QVBoxLayout()
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(0)
+        box.addWidget(self.work_prints)
+        apply_row = QHBoxLayout()
+        apply_row.addStretch(1)
+        apply_row.addWidget(self.apply_metadata_btn)
+        box.addLayout(apply_row)
+        self.layout.addLayout(box, 0)
 
         self.layout.addWidget(section_subheader("EDIT HISTORY"))
 
@@ -49,6 +66,7 @@ class HistoryPanel(BaseSidebar):
         self.work_prints.itemClicked.connect(lambda item: self.controller.session.load_work_print(item.text()))
         self.work_prints.customContextMenuRequested.connect(self._on_work_print_menu)
         self.save_btn.clicked.connect(self.save_work_print)
+        self.apply_metadata_btn.toggled.connect(self._on_apply_metadata_toggled)
         self.controller.session.history_changed.connect(self.refresh)
         self.controller.session.work_prints_changed.connect(self.refresh)
         self.controller.session.file_selected.connect(lambda _: self.refresh())
@@ -87,6 +105,9 @@ class HistoryPanel(BaseSidebar):
             if replace != QMessageBox.StandardButton.Yes:
                 return
         session.save_work_print(name)
+
+    def _on_apply_metadata_toggled(self, checked: bool) -> None:
+        self.controller.session.set_work_print_apply_metadata(checked)
 
     def _on_item_clicked(self, item: QListWidgetItem) -> None:
         self.controller.jump_to_history_step(item.data(_INDEX_ROLE))
