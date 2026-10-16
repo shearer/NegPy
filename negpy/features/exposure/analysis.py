@@ -264,22 +264,23 @@ def encoded_of_zone(zone: float) -> float:
 
 
 def zone_occupancy(l_bins: np.ndarray) -> np.ndarray:
-    """Fold display-encoded luma histogram bins into ZONE_COUNT occupancy fractions."""
+    """Fold display-encoded luma histogram bins into the share of each zone 0..X, rounded to the
+    nearest zone as zone_field rounds, so the strip and the Zone Overlay count alike."""
     l_bins = np.asarray(l_bins, dtype=float)
-    out = np.zeros(ZONE_COUNT)
+    out = np.zeros(ZONE_COUNT + 1)
     total = float(l_bins.sum())
     if total <= 0.0:
         return out
     centers = (np.arange(l_bins.size) + 0.5) / l_bins.size
-    cells = np.minimum(np.asarray(zone_of_encoded(centers)).astype(int), ZONE_COUNT - 1)
+    cells = np.clip(np.rint(np.asarray(zone_of_encoded(centers))), 0, ZONE_COUNT).astype(int)
     np.add.at(out, cells, l_bins)
     return out / total
 
 
 def zone_warnings(occ: np.ndarray) -> Tuple[bool, bool]:
-    """(shadow, highlight): a texture zone pair is empty while its extreme holds mass."""
+    """(shadow, highlight): a texture zone pair is empty while its extreme pair holds mass."""
     shadow = float(occ[2] + occ[3]) < ZONE_EMPTY and float(occ[0] + occ[1]) > ZONE_LOADED
-    highlight = float(occ[7] + occ[8]) < ZONE_EMPTY and float(occ[9]) > ZONE_LOADED
+    highlight = float(occ[7] + occ[8]) < ZONE_EMPTY and float(occ[9] + occ[10]) > ZONE_LOADED
     return shadow, highlight
 
 
@@ -292,15 +293,6 @@ def _mask_preview(rgb: Any, max_edge: int) -> Optional[np.ndarray]:
         return None
     step = max(1, -(-max(rgb.shape[:2]) // max_edge))
     return np.ascontiguousarray(rgb[::step, ::step, :3], dtype=np.float32)
-
-
-def zone_mask(rgb: Any, zone: int, max_edge: int = MASK_MAX_EDGE) -> Optional[np.ndarray]:
-    """Pixels in one zone-strip cell (IX also holds X), on a strided preview of an encoded frame."""
-    small = _mask_preview(rgb, max_edge)
-    if small is None:
-        return None
-    cells = np.minimum(np.nan_to_num(zone_of_encoded(get_luminance(small))).astype(np.int32), ZONE_COUNT - 1)
-    return cells == int(zone)
 
 
 def clip_masks(rgb: Any, max_edge: int = MASK_MAX_EDGE) -> Optional[Tuple[np.ndarray, np.ndarray]]:
@@ -352,6 +344,53 @@ def zone_region_labels(zones: np.ndarray) -> List[Tuple[int, int, int]]:
             cx, cy = centroids[i]
             j = int(np.argmin((xs - cx) ** 2 + (ys - cy) ** 2))
             out.append((int(xs[j]), int(ys[j]), int(zone)))
+    return out
+
+
+ZONE_FIELD_MAX_EDGE = 768  # drawn scaled to the view; finer only sharpens grain
+
+
+def zone_field(rgb: Any, max_edge: int = ZONE_FIELD_MAX_EDGE) -> Optional[np.ndarray]:
+    """Integer Adams zone (0..10) per pixel of a display-encoded H×W×3 frame, at most
+    `max_edge` on the long side; None if the frame isn't one. Smoothed first, so grain
+    does not split one tone into speckled zones."""
+    rgb = np.asarray(rgb)
+    if rgb.ndim != 3 or rgb.shape[-1] < 3 or min(rgb.shape[:2]) < 2:
+        return None
+    h, w = rgb.shape[:2]
+    # Slice first: INTER_AREA straight off a full-res HQ buffer is slow.
+    step = max(1, max(h, w) // (2 * max_edge))
+    small = np.ascontiguousarray(rgb[::step, ::step, :3], dtype=np.float32)
+    scale = min(1.0, max_edge / max(small.shape[:2]))
+    sh, sw = small.shape[:2]
+    lum = get_luminance(cv2.resize(small, (max(1, round(sw * scale)), max(1, round(sh * scale))), interpolation=cv2.INTER_AREA))
+    lum = cv2.GaussianBlur(np.ascontiguousarray(lum, dtype=np.float32), (0, 0), 2.0)
+    zones = np.clip(np.rint(np.nan_to_num(zone_of_encoded(lum))), 0, ZONE_COUNT).astype(np.uint8)
+    return cv2.medianBlur(zones, 5)
+
+
+def zone_shares(zones: np.ndarray) -> np.ndarray:
+    """Fraction of the frame in each zone 0..10."""
+    return np.bincount(zones.ravel(), minlength=ZONE_COUNT + 1)[: ZONE_COUNT + 1] / max(1, zones.size)
+
+
+def zone_anchors(zones: np.ndarray, min_share: float = 0.01) -> List[Tuple[int, int, int, float]]:
+    """(x, y, zone, inset) per region holding at least `min_share` of the frame, at its most
+    interior pixel; `inset` is that pixel's distance to the region's edge. The frame edge
+    counts as an edge, so a numeral never sits half off the picture."""
+    out: List[Tuple[int, int, int, float]] = []
+    min_area = min_share * zones.size
+    for zone in np.unique(zones):
+        count, comp, stats, _ = cv2.connectedComponentsWithStats((zones == zone).astype(np.uint8), connectivity=4)
+        for i in range(1, count):  # 0 is the background (everything not this zone)
+            if stats[i, cv2.CC_STAT_AREA] < min_area:
+                continue
+            mask = (comp == i).astype(np.uint8)
+            mask[0, :] = mask[-1, :] = 0
+            mask[:, 0] = mask[:, -1] = 0
+            dist = cv2.distanceTransform(mask, cv2.DIST_L2, 3)
+            y, x = np.unravel_index(int(np.argmax(dist)), dist.shape)
+            out.append((int(x), int(y), int(zone), float(dist[y, x])))
     return out
 
 

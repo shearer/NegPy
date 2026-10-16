@@ -112,6 +112,7 @@ Every feature lives in `negpy/features/<name>/`:
   - `tool_toggle`: icon-only or icon+label toggle; `align_left=True` for toggles stacked in one column.
   - `labeled_toggle` (checkable) and `labeled_action`, its one-shot twin; `primary=True` for the panel's one call to action.
   - `icon_button`: icon-only action. `header_button`: a section header's small flat icon, also a help or row icon in a line of text.
+  - `gradient_icon(name, sweep)`: a glyph filled with a `Sweep` (token stops and an angle), for the one icon in a row that must stand out. A sweep shows what its tool changes or paints, and every sweep is a named constant beside `RGB_SWEEP`; never reuse one for a different meaning.
   - `templates.field_label`: label beside a combo/entry; `width=` makes it a right-aligned label column. `field_row` builds the whole label + field + icon-button row; in a card with sliders the row takes the slider label column and track width. `templates.hint_label`: a line of help under a control.
   - `section_subheader` for grouping; `header_row(header, *icons)` puts icon tools that act on the whole subsection at its right end.
   - `CollapsibleSection`: a panel section, and the only reset affordance.

@@ -268,10 +268,11 @@ def create_virtual_roll(repo: Any, name: str, member_paths: List[str]) -> str:
     return roll_id
 
 
-def add_extra_members(repo: Any, roll_id: str, paths: List[str]) -> None:
+def add_extra_members(repo: Any, roll_id: str, paths: List[str], parts: Sequence[str] = ()) -> None:
     """Extend a roll's membership, in one write: a folder roll's extra_paths, or a virtual
     roll's member_paths. Skips an unknown roll id, paths already members and files the
-    folder's own walk already finds."""
+    folder's own walk already finds. *parts* (a composite's or triplet's other files) leave
+    excluded_paths with *paths* but never join the membership."""
     store = _read(repo)
     entry = store.get(roll_id)
     if entry is None:
@@ -280,9 +281,63 @@ def add_extra_members(repo: Any, roll_id: str, paths: List[str]) -> None:
     known = set(entry[key])
     folder = _folder_key(entry["folder_path"]) if entry["kind"] == "folder" else None
     new = [p for p in dict.fromkeys(paths) if p not in known and _folder_key(os.path.dirname(p)) != folder]
-    if new:
+    added = {_folder_key(p) for p in (*paths, *parts)}
+    excluded = entry.get("excluded_paths", [])
+    kept = [p for p in excluded if _folder_key(p) not in added]
+    if new or kept != excluded:
         entry[key] = [*entry[key], *new]
+        if kept != excluded:
+            entry["excluded_paths"] = kept
         _write(repo, store)
+
+
+def remove_members(repo: Any, roll_id: str, paths: List[str], hashes: List[str]) -> List[str]:
+    """Take *paths* out of a roll, in one write, with every record the roll keeps for
+    *hashes* (unforked): card locks, scene membership and forks. A file in a folder roll's
+    own folder joins its excluded_paths, which every walk of that folder skips. Returns
+    the hashes whose fork edit the caller must delete."""
+    store = _read(repo)
+    entry = store.get(roll_id)
+    if entry is None:
+        return []
+    gone = {_folder_key(p) for p in paths}
+    for key in ("extra_paths", "member_paths"):
+        if key in entry:
+            entry[key] = [p for p in entry[key] if _folder_key(p) not in gone]
+    if entry["kind"] == "folder":
+        folder = _folder_key(entry["folder_path"])
+        own = [p for p in dict.fromkeys(paths) if _folder_key(os.path.dirname(p)) == folder]
+        excluded = entry.get("excluded_paths", [])
+        known = {_folder_key(p) for p in excluded}
+        entry["excluded_paths"] = [*excluded, *(p for p in own if _folder_key(p) not in known)]
+    drop = set(hashes)
+    if "frame_overrides" in entry:
+        entry["frame_overrides"] = {h: cards for h, cards in entry["frame_overrides"].items() if h not in drop}
+    if "scenes" in entry:
+        scenes = dict(entry["scenes"])
+        _pull_members(scenes, list(drop))
+        entry["scenes"] = scenes
+    forked = [h for h in entry.get("forked_hashes", []) if h in drop]
+    if forked:
+        entry["forked_hashes"] = [h for h in entry["forked_hashes"] if h not in drop]
+    _write(repo, store)
+    return forked
+
+
+def excluded_paths(repo: Any, folders: Sequence[str]) -> frozenset:
+    """The files a walk of *folders* skips: those removed from the roll of each, in
+    `_folder_key` form. A folder that is no roll's adds nothing."""
+    keys = {_folder_key(f) for f in folders}
+    return frozenset(
+        _folder_key(p)
+        for entry in _view(repo).values()
+        if entry.get("kind") == "folder" and _folder_key(entry.get("folder_path") or "") in keys
+        for p in entry.get("excluded_paths", ())
+    )
+
+
+def is_excluded_key(path: str, excluded: Collection[str]) -> bool:
+    return _folder_key(path) in excluded
 
 
 def roll_edit_hash(from_hash: str, roll_id: str) -> str:
@@ -379,6 +434,8 @@ def rolls_containing_path(repo: Any, path: str) -> List[str]:
             folder = entry.get("folder_path", "")
             folder_norm = os.path.normcase(os.path.abspath(folder)) if folder else ""
             in_folder = bool(folder_norm) and norm.startswith(folder_norm + os.sep)
+            if in_folder and _folder_key(path) in {_folder_key(p) for p in entry.get("excluded_paths", ())}:
+                continue
             if in_folder or path in entry.get("extra_paths", []):
                 out.append(roll_id)
         elif path in entry.get("member_paths", []):
@@ -467,7 +524,7 @@ def rehome_paths(repo: Any, move: Callable[[str], str]) -> None:
     for entry in store.values():
         if entry.get("folder_path"):
             entry["folder_path"] = move(entry["folder_path"])
-        for key in ("member_paths", "extra_paths"):
+        for key in ("member_paths", "extra_paths", "excluded_paths"):
             if key in entry:
                 entry[key] = [move(p) for p in entry[key]]
     _write(repo, store)

@@ -7,7 +7,7 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 
 from negpy.desktop.controller import AppController
 from negpy.desktop.view.shortcut_registry import label_with_shortcut, tooltip_with_shortcut
-from negpy.desktop.view.styles.templates import header_row, hint_label, section_subheader, set_hint_kind, wrap_tooltip
+from negpy.desktop.view.styles.templates import gradient_icon, header_row, hint_label, section_subheader, set_hint_kind, wrap_tooltip
 from negpy.desktop.view.widgets.collapsible import NO_ROLL_SCOPE_HINT, CollapsibleSection, make_section
 from negpy.desktop.view.widgets.charts import MiniCurveWidget, MiniHistogramWidget, MiniRGBHistogramWidget
 from negpy.desktop.view.styles.theme import THEME
@@ -413,6 +413,8 @@ class ControlsPanel(QWidget):
             )
             if header is not None:
                 page_layout.addWidget(header)
+                if key == "tone":
+                    self._add_pick_better(header)
             for section in sections:
                 page_layout.addWidget(section)
             page_layout.addStretch(1)
@@ -436,6 +438,34 @@ class ControlsPanel(QWidget):
         header.roll_revert_requested.connect(lambda keys=tuple(card_keys): self.revert_cards_to_roll(keys))
         self.tab_headers.append(header)
         return header
+
+    def _add_pick_better(self, header: TabHeader) -> None:
+        """Pick Better tunes Filtration, Tone and Paper Response, so it sits on the Exposure tab's header."""
+        self.pick_better_btn = header.add_lead_toggle(gradient_icon("fa5s.balance-scale"), self._pick_better_tooltip())
+        self.pick_better_btn.clicked.connect(lambda checked: self.controller.toggle_pick_better(force=checked))
+        # Session state, not config, so the button follows the controller rather than sync_ui.
+        self.controller.pick_better_changed.connect(self._sync_pick_better_btn)
+
+    @staticmethod
+    def _pick_better_tooltip(printing: bool = False) -> str:
+        if printing:
+            return "Printing Pick Better…"
+        return tooltip_with_shortcut(
+            "Pick Better: a separate window shows the current edit on top and two candidates below — "
+            "the stronger on the left, the weaker on the right. Click a candidate to keep it; the next "
+            "pair fills the same window. A fixed 22-round sequence runs first, then finer pairs. OK ends "
+            "the mode; Undo re-shows the previous pair.",
+            "toggle_pick_better",
+        )
+
+    def _sync_pick_better_btn(self, _up: bool) -> None:
+        """ponytail: Pick Better is one job with no per-pair progress — the button is
+        icon-only, so it goes dead with a 'printing' tooltip rather than changing its
+        label. Per-pair progress if the endless refinement ever feels slow."""
+        state = self.controller.state
+        self.pick_better_btn.setChecked(state.pick_better or state.pick_better_pending)
+        self.pick_better_btn.setEnabled(not state.pick_better_pending)
+        self.pick_better_btn.setToolTip(wrap_tooltip(self._pick_better_tooltip(printing=state.pick_better_pending)))
 
     def _apply_tab(self, card_keys: tuple) -> None:
         """Every card on the tab in one picker. A whole-roll apply is recorded per card,
@@ -777,7 +807,7 @@ class ControlsPanel(QWidget):
         )
         lab.chroma_denoise_slider.setToolTip(
             tooltip_with_shortcut(
-                "Chroma denoise in Lab space — smooths color noise while preserving luminance grain",
+                "Removes color speckle finer than this radius and keeps color edges; luminance grain stays",
                 ["chroma_denoise_inc", "chroma_denoise_dec"],
             )
         )

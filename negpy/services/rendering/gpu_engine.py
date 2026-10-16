@@ -56,8 +56,8 @@ from negpy.features.geometry.logic import (
     compute_geometry_crop_rect,
     get_manual_rect_coords,
 )
-from negpy.features.geometry.models import GeometryConfig
-from negpy.features.lab.logic import gaussian_kernel_1d, rl_iterations
+from negpy.features.geometry.models import GeometryConfig, crops_frame
+from negpy.features.lab.logic import chroma_denoise_sigma, gaussian_kernel_1d, rl_iterations
 from negpy.features.lab.models import SharpenMethod
 from negpy.features.altprocess.models import AltProcess
 from negpy.features.cyanotype.logic import CYANOTYPE_CONSTANTS, sensitizer_constants
@@ -154,6 +154,7 @@ def _build_analysis_source(
     analysis_rect: Optional[tuple],
     tiling_mode: bool,
     max_size: int,
+    meter_rect: Optional[tuple] = None,
 ) -> Tuple[np.ndarray, float]:
     """The shared meter grid's own buffer: oriented, downsampled (only a meter reads it), warped and sliced once for every
     meter reading it. The whole frame is warped before the ROI is cut, as on the CPU and in the print stage: a crop rotated
@@ -179,8 +180,13 @@ def _build_analysis_source(
         sy, sx = analysis_source.shape[0] / full_h, analysis_source.shape[1] / full_w
         y1, y2, x1, x2 = roi
         base_roi = (round(y1 * sy), round(y2 * sy), round(x1 * sx), round(x2 * sx))
+    meter_rect = meter_rect if not tiling_mode else None
     analysis_roi, an_buffer = resolve_analysis_region(
-        analysis_source.shape, base_roi, analysis_buffer, analysis_rect if not tiling_mode else None
+        analysis_source.shape,
+        None if meter_rect is not None else base_roi,
+        analysis_buffer,
+        analysis_rect if not tiling_mode else None,
+        meter_rect,
     )
     if analysis_roi is not None:
         ay1, ay2, ax1, ax2 = analysis_roi
@@ -217,6 +223,7 @@ def _analysis_cache_key(settings: WorkspaceConfig, analysis_source_hash: str) ->
         p.process_mode,
         p.analysis_buffer,
         p.analysis_rect,
+        p.meter_rect,
         p.luma_range_clip,
         p.color_range_clip,
         p.use_luma_average,
@@ -302,6 +309,8 @@ class GPUEngine:
             "clahe_apply": get_resource_path(os.path.join("negpy", "features", "lab", "shaders", "clahe_apply.wgsl")),
             "lab_sharpen_h": get_resource_path(os.path.join("negpy", "features", "lab", "shaders", "lab_sharpen_h.wgsl")),
             "lab_sharpen_v": get_resource_path(os.path.join("negpy", "features", "lab", "shaders", "lab_sharpen_v.wgsl")),
+            "chroma_lowpass_h": get_resource_path(os.path.join("negpy", "features", "lab", "shaders", "chroma_lowpass_h.wgsl")),
+            "chroma_lowpass_v": get_resource_path(os.path.join("negpy", "features", "lab", "shaders", "chroma_lowpass_v.wgsl")),
             "rl_init": get_resource_path(os.path.join("negpy", "features", "lab", "shaders", "rl_init.wgsl")),
             "rl_blur_h": get_resource_path(os.path.join("negpy", "features", "lab", "shaders", "rl_blur_h.wgsl")),
             "rl_div_v": get_resource_path(os.path.join("negpy", "features", "lab", "shaders", "rl_div_v.wgsl")),
@@ -384,6 +393,10 @@ class GPUEngine:
         self._sabattier_kernel_key: Optional[float] = None
         # (method, radius, dims) of the blur state in the sharpen textures; None once their input moved.
         self._sharpen_state_key: Optional[tuple] = None
+        # The sigma of the Chroma Denoise taps currently in chroma_k.
+        self._chroma_kernel_key: Optional[float] = None
+        # (sigma, dims) of the low-pass in the chroma textures; None once their input moved.
+        self._chroma_state_key: Optional[tuple] = None
 
         # Bind groups reference resources, not contents, so they survive across frames.
         # Cache and reuse them (cleared in cleanup()): about 28 fewer wgpu calls per frame.
@@ -498,20 +511,30 @@ class GPUEngine:
             self._local_ev_key = None
         if labels & {"rl_a", "rl_b", "sharpen_h", "sharpen_v"}:
             self._sharpen_state_key = None
+        if labels & {"chroma_h", "chroma_v"}:
+            self._chroma_state_key = None
         if "contrast_mask" in labels:
             self._mask_tex_key = None
         # Bind groups keyed by id() never match a destroyed view again; drop, don't leak.
         self._bind_group_cache.clear()
 
-    def requires_tiling(self, img: np.ndarray, settings: WorkspaceConfig) -> bool:
-        """True when a direct texture chain exceeds a device or working-set limit."""
+    def requires_tiling(self, img: np.ndarray, settings: WorkspaceConfig, render_size_ref: Optional[float] = None) -> bool:
+        """True when a direct texture chain exceeds a device or working-set limit.
+
+        An export paper larger than the texture limit tiles too: the tiled path assembles
+        it in host memory, so the export keeps the size the user asked for."""
         h, w = img.shape[:2]
         max_tex = self.gpu.limits.get("max_texture_dimension_2d", 8192)
         if APP_CONFIG.max_texture_size is not None:
             max_tex = min(max_tex, APP_CONFIG.max_texture_size)
         rot = settings.geometry.rotation % 4
         w_rot, h_rot = (h, w) if rot in (1, 3) else (w, h)
-        return w_rot > max_tex or h_rot > max_tex or w * h > TILING_THRESHOLD_PX
+        if w_rot > max_tex or h_rot > max_tex or w * h > TILING_THRESHOLD_PX:
+            return True
+        if render_size_ref:
+            return False
+        paper_w, paper_h, *_ = self._calculate_layout_dims(settings, w_rot, h_rot, None)
+        return max(paper_w, paper_h) > max_tex
 
     def _release_texture_pool(self, retain: Optional[GPUTexture] = None) -> None:
         """Destroy pooled textures after their submitted work is complete."""
@@ -526,6 +549,7 @@ class GPUEngine:
         self._local_ev_key = None
         self._mask_tex_key = None
         self._sharpen_state_key = None
+        self._chroma_state_key = None
 
     def _init_resources(self) -> None:
         """Initializes hardware pipelines and persistent buffers."""
@@ -533,6 +557,7 @@ class GPUEngine:
             return
         # Buffers are recreated below, so force the next kernel upload.
         self._sharpen_kernel_key = None
+        self._chroma_kernel_key = None
         t0 = time.perf_counter()
         device = self.gpu.device
         self._sampler = device.create_sampler(min_filter="linear", mag_filter="linear")
@@ -557,6 +582,8 @@ class GPUEngine:
         )
         # Sharpen blur taps (gaussian_kernel_1d): 1024 f32 covers radius <= 511.
         self._buffers["sharpen_k"] = GPUBuffer(4096, wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST)
+        # Chroma Denoise low-pass taps, the same helper's.
+        self._buffers["chroma_k"] = GPUBuffer(4096, wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST)
         # The Mackie-line blur taps, the same helper's, for the Sabattier passes.
         self._buffers["sabattier_k"] = GPUBuffer(4096, wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST)
         # Filed-carrier jitter profiles are a fixed table, so upload once.
@@ -781,6 +808,7 @@ class GPUEngine:
                     roi,
                     p.analysis_buffer,
                     p.analysis_rect,
+                    p.meter_rect,
                     p.crosstalk_strength,
                     p.crosstalk_matrix,
                     p.crosstalk_process,
@@ -804,6 +832,7 @@ class GPUEngine:
                     settings.process.analysis_rect,
                     tiling_mode,
                     APP_CONFIG.preview_render_size,
+                    meter_rect=None if crops_frame(settings.geometry) else settings.process.meter_rect,
                 )
                 # Shared prefilter, once for all five meters (ROI already applied).
                 # Unmixed like the CPU path so every meter reads the unmixed film.
@@ -864,7 +893,7 @@ class GPUEngine:
         axis_grid = cam_prefiltered if transfer else prefiltered
         if needs_axis and axis_grid is not None:
             axis_bounds = LogNegativeBounds(*transfer_bounds()) if transfer else bounds
-            neutral_axis_refs = measure_neutral_axis_from_log(axis_grid, axis_bounds, None, 0.0)
+            neutral_axis_refs = measure_neutral_axis_from_log(axis_grid, axis_bounds, None, 0.0, exclude_foliage=not transfer)
             pooled_axis = pooled_neutral_axis(settings.process)
             if pooled_axis is not None:
                 neutral_axis_refs = blend_neutral_axis(neutral_axis_refs, pooled_axis)
@@ -1293,6 +1322,7 @@ class GPUEngine:
 
         if start_stage <= 2:
             self._sharpen_state_key = None
+            self._chroma_state_key = None
         if start_stage <= 4:
             # Sharpen state (USM blur or RL deconvolution) feeds the lab pass; a 1x1 dummy keeps binding 3 valid when it is
             # off. The blur reads only its input, radius and kernel, so a lab-only change reuses the last one.
@@ -1329,6 +1359,23 @@ class GPUEngine:
                     )
             else:
                 tex_sharpen_v = self._get_intermediate_texture(1, 1, usage, "sharpen_v")
+            # The Chroma Denoise low-pass reads only its input and sigma, so a lab-only change reuses it too.
+            chroma_sigma = chroma_denoise_sigma(settings.lab.chroma_denoise, scale_factor)
+            if chroma_sigma > 0.0:
+                tex_chroma_h = self._get_intermediate_texture(w_rot, h_rot, usage, "chroma_h")
+                tex_chroma_v = self._get_intermediate_texture(w_rot, h_rot, usage, "chroma_v")
+                chroma_key = (chroma_sigma, w_rot, h_rot)
+                if chroma_key != self._chroma_state_key:
+                    ck = self._buffers["chroma_k"]
+                    self._dispatch_pass(
+                        enc, "chroma_lowpass_h", [(0, prev_tex.view), (1, tex_chroma_h.view), (2, lab_u), (3, ck)], w_rot, h_rot
+                    )
+                    self._dispatch_pass(
+                        enc, "chroma_lowpass_v", [(0, tex_chroma_h.view), (1, tex_chroma_v.view), (2, lab_u), (3, ck)], w_rot, h_rot
+                    )
+                    self._chroma_state_key = chroma_key
+            else:
+                tex_chroma_v = self._get_intermediate_texture(1, 1, usage, "chroma_v")
             self._dispatch_pass(
                 enc,
                 "lab",
@@ -1337,6 +1384,7 @@ class GPUEngine:
                     (1, tex_lab.view),
                     (2, lab_u),
                     (3, tex_sharpen_v.view),
+                    (4, tex_chroma_v.view),
                 ],
                 w_rot,
                 h_rot,
@@ -2120,23 +2168,29 @@ class GPUEngine:
             if self._sharpen_kernel_key != kernel_key:
                 self._buffers["sharpen_k"].upload(kernel)
                 self._sharpen_kernel_key = kernel_key
-        l_data = (
-            struct.pack(
-                "ffffffffff",
-                float(lab.sharpen),
-                float(lab.chroma_denoise),
-                float(lab.saturation),
-                float(lab.glow_amount),
-                float(lab.halation_strength),
-                # Chroma-denoise scales its blur radius by the preview downsample ratio,
-                # like the CPU path (radius * scale_factor).
-                float(scale_factor),
-                float(sharpen_radius_px),
-                float(lab.sharpen_masking),
-                1.0 if lab.sharpen_method == SharpenMethod.RL else 0.0,
-                float(lab.skin_protection),
-            )
-            + b"\x00" * 8
+        chroma_radius_px = 0
+        chroma_sigma = chroma_denoise_sigma(lab.chroma_denoise, scale_factor)
+        if chroma_sigma > 0.0:
+            chroma_kernel = gaussian_kernel_1d(chroma_sigma)
+            chroma_radius_px = len(chroma_kernel) // 2
+            if self._chroma_kernel_key != chroma_sigma:
+                self._buffers["chroma_k"].upload(chroma_kernel)
+                self._chroma_kernel_key = chroma_sigma
+        l_data = struct.pack(
+            "ffffffffffff",
+            float(lab.sharpen),
+            float(lab.chroma_denoise),
+            float(lab.saturation),
+            float(lab.glow_amount),
+            float(lab.halation_strength),
+            # Chroma Denoise's sigma is chroma_denoise * scale_factor, as on the CPU.
+            float(scale_factor),
+            float(sharpen_radius_px),
+            float(lab.sharpen_masking),
+            1.0 if lab.sharpen_method == SharpenMethod.RL else 0.0,
+            float(lab.skin_protection),
+            float(chroma_radius_px),
+            0.0,
         )
 
         is_bw = 1 if settings.process.process_mode == ProcessMode.BW else 0
@@ -2298,7 +2352,10 @@ class GPUEngine:
         self, settings: WorkspaceConfig, cw: int, ch: int, size_ref: Optional[float]
     ) -> Tuple[int, int, int, int, int, int, int]:
         """Calculates final paper and image dimensions based on print settings.
-        Returns (paper_w, paper_h, content_w, content_h, off_x, off_y, dpi)."""
+        Returns (paper_w, paper_h, content_w, content_h, off_x, off_y, dpi).
+
+        Only a preview paper is capped to max_texture_size; an export paper over the cap
+        tiles instead (``requires_tiling``)."""
         mode = settings.export.export_resolution_mode
 
         # Preview path: size_ref is the desired paper long edge. Derive virtual DPI from it
@@ -2376,7 +2433,7 @@ class GPUEngine:
             fit = min(cw / content_w, ch / content_h)
             return self._calculate_layout_dims(settings, cw, ch, size_ref * fit)
 
-        max_tex = APP_CONFIG.max_texture_size
+        max_tex = APP_CONFIG.max_texture_size if size_ref else None
         if max_tex is not None:
             long_edge = max(paper_w, paper_h)
             if long_edge > max_tex:
@@ -2570,7 +2627,7 @@ class GPUEngine:
         """High-level processing entry point with automatic tiling."""
         self._init_resources()
         self.evict_stale_textures()
-        if self.requires_tiling(img, settings):
+        if self.requires_tiling(img, settings, render_size_ref):
             return self._process_tiled(
                 img,
                 settings,
@@ -2662,7 +2719,13 @@ class GPUEngine:
         # is the one they share. Taken from here rather than from the last preview, which
         # may belong to another image or to settings the export has since moved past.
         _, metrics_ref = self.process_to_texture(
-            img_small, settings, scale_factor=scale_factor, cam_xyz=cam_xyz, camera_wb=camera_wb, readback_metrics=readback_metrics
+            img_small,
+            settings,
+            scale_factor=scale_factor,
+            cam_xyz=cam_xyz,
+            camera_wb=camera_wb,
+            readback_metrics=readback_metrics,
+            apply_layout=False,
         )
 
         global_cdfs = self._readback_clahe_cdf()
@@ -2701,8 +2764,13 @@ class GPUEngine:
         analysis_roi = (int(y1 * a_scale), int(y2 * a_scale), int(x1 * a_scale), int(x2 * a_scale))
         analysis_shape = (int(ah * a_scale), int(aw * a_scale))
         # Freehand analysis_rect wins over the crop ROI + centered buffer here too.
+        meter_rect = None if crops_frame(settings.geometry) else settings.process.meter_rect
         meter_roi, meter_buffer = resolve_analysis_region(
-            analysis_shape, analysis_roi, settings.process.analysis_buffer, settings.process.analysis_rect
+            analysis_shape,
+            None if meter_rect is not None else analysis_roi,
+            settings.process.analysis_buffer,
+            settings.process.analysis_rect,
+            meter_rect,
         )
         analysis_small: Optional[np.ndarray] = None
 
@@ -2772,7 +2840,7 @@ class GPUEngine:
             if settings.process.process_mode == ProcessMode.C41:
                 global_shadow_refs = measure_shadow_refs_from_log(_prefiltered(), None, 0.0, sorted_grid=_sorted())
             axis_bounds = meter_bounds if transfer else global_bounds
-            global_neutral_axis = measure_neutral_axis_from_log(_meter_grid(), axis_bounds, None, 0.0)
+            global_neutral_axis = measure_neutral_axis_from_log(_meter_grid(), axis_bounds, None, 0.0, exclude_foliage=not transfer)
             pooled_axis = pooled_neutral_axis(settings.process)
             if pooled_axis is not None:
                 global_neutral_axis = blend_neutral_axis(global_neutral_axis, pooled_axis)
@@ -2842,9 +2910,10 @@ class GPUEngine:
             halo = max(halo, int(np.ceil(max(3.0, 15.0 * scale_factor))))
         if settings.lab.halation_strength > 0.0:
             halo = max(halo, int(np.ceil(max(5.0, 25.0 * scale_factor))))
-        # Chroma Denoise taps reach 2 * chroma_denoise * scale_factor px (lab.wgsl).
-        if settings.lab.chroma_denoise > 0.0:
-            halo = max(halo, int(np.ceil(2.0 * settings.lab.chroma_denoise * scale_factor)) + 1)
+        # Chroma Denoise reads its low-pass kernel's half-width, plus one for the edge test's neighbors.
+        chroma_sigma = chroma_denoise_sigma(settings.lab.chroma_denoise, scale_factor)
+        if chroma_sigma > 0.0:
+            halo = max(halo, len(gaussian_kernel_1d(chroma_sigma)) // 2 + 2)
         # The Mackie-line blur reads its kernel's half-width each side, sigma from the whole
         # frame's short side, so every tile draws the frame's line.
         sabattier_sigma = None

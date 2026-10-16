@@ -71,6 +71,9 @@ class ToolMode(Enum):
 # These tools' renders carry crop_preview_full, which skips the crop, the border and the filed carrier.
 UNCROPPED_PREVIEW_TOOLS = frozenset({ToolMode.CROP_MANUAL, ToolMode.ANALYSIS_DRAW, ToolMode.KEYSTONE_LINES})
 
+# Zone Overlay looks, by stored key and menu label.
+ZONE_STYLES = {"false_color": "Color", "zone_map": "Grayscale", "grid": "Grid"}
+
 
 @dataclass
 class AppState:
@@ -229,8 +232,10 @@ class AppState:
     # diagnostic. Never persisted.
     dust_overlay_mode: str = "off"
 
-    # Adams-zone box overlay on the canvas: display-only and session-only, never persisted.
+    # Adams-zone overlay on the canvas: display-only and session-only, never persisted.
     zones_overlay: bool = False
+    # Its look, a ZONE_STYLES key. A persisted preference.
+    zones_style: str = "false_color"
     # Clipping Overlay (paper black and paper white marked on the frame) and the zone the
     # zone strip's hover lights up. Display-only, session-only.
     clipping_overlay: bool = False
@@ -240,6 +245,10 @@ class AppState:
 
     # Grain focuser: a near-1:1 loupe following the cursor. Display-only, session-only.
     grain_focuser: bool = False
+    # Densitometer reading in a chip beside the pointer. A persisted preference.
+    cursor_probe: bool = False
+    # Canvas corner pills: 0 off, 1 basic, 2 full (hud.INFO_*). A persisted preference.
+    canvas_info_level: int = 1
 
     # Printing notes: the dodge/burn map and print recipe over the frame. Display-only and
     # session-only, never persisted.
@@ -269,6 +278,13 @@ class AppState:
     # Quarter-turns CCW the ladder is turned by. Shared by both kinds and kept across clear
     # and reprint, so a chosen orientation sticks for the session.
     test_strip_rotation: int = 0
+
+    # Pick Better: a session-only two-up, dropped by any real render. `pick_better` is True
+    # while the three-frame window (committed edit on top, the two candidates below) is up;
+    # `pick_better_pending` is True while a pair renders. A click on a candidate commits that
+    # candidate's one ExposureConfig field to the live config and proposes the next pair.
+    pick_better: bool = False
+    pick_better_pending: bool = False
 
     # Reverse scroll-wheel zoom direction on the image viewer (scroll up = zoom out).
     invert_zoom_scroll: bool = False
@@ -300,6 +316,8 @@ class AppState:
     compare_before_key: str = ""
     # Divider position, content-normalized x (0 = all after, 1 = all before)
     compare_split: float = 0.5
+    # True while the compare key is held: the whole picture shows the baseline.
+    compare_hold: bool = False
 
     # Export presets (globally managed, not per-file)
     export_presets: List[ExportPreset] = field(default_factory=list)
@@ -871,6 +889,10 @@ class DesktopSessionManager(QObject):
             self.state.canvas_bg_index = int(saved_bg)
         self.state.color_vision = str(self.repo.get_global_setting("color_vision", "standard") or "standard")
         self.state.zone_hover_highlight = bool(self.repo.get_global_setting("zone_hover_highlight", True))
+        self.state.cursor_probe = bool(self.repo.get_global_setting("cursor_probe", False))
+        style = self.repo.get_global_setting("zones_style", "false_color")
+        self.state.zones_style = style if style in ZONE_STYLES else "false_color"
+        self.state.canvas_info_level = int(self.repo.get_global_setting("canvas_info_level", 1) or 0) % 3
 
         saved_immersive = self.repo.get_global_setting("immersive_canvas")
         if saved_immersive is not None:
@@ -1859,13 +1881,24 @@ class DesktopSessionManager(QObject):
         self.repo.save_work_print(self.state.current_file_hash, name, self.state.config)
         self.work_prints_changed.emit()
 
+    def work_print_apply_metadata(self) -> bool:
+        """The Load Metadata global toggle: on restores a work print's saved metadata, off
+        (the default) keeps the metadata on screen now and drops the print's."""
+        return bool(self.repo.get_global_setting("work_print_apply_metadata", False))
+
+    def set_work_print_apply_metadata(self, enabled: bool) -> None:
+        self.repo.save_global_setting("work_print_apply_metadata", bool(enabled))
+
     def load_work_print(self, name: str) -> None:
         """Make a named version live. Committed through update_config, so it lands on the
-        undo stack and a plain Ctrl+Z puts back what was on screen before."""
+        undo stack and a plain Ctrl+Z puts back what was on screen before. Load Metadata
+        (off by default) keeps the live metadata; on restores the print's."""
         if not self.state.current_file_hash:
             return
         config = self.repo.load_work_print(self.state.current_file_hash, name)
         if config is not None:
+            if not self.work_print_apply_metadata():
+                config = replace(config, metadata=self.state.config.metadata)
             self.update_config(config, persist=True)
             self._relock_diverged_cards()
 
@@ -2346,7 +2379,11 @@ class DesktopSessionManager(QObject):
         """
         Removes all currently selected files from the session.
         """
-        indices = sorted(set(self.state.selected_indices), reverse=True)
+        self.remove_files(self.state.selected_indices)
+
+    def remove_files(self, indices: List[int]) -> None:
+        """Removes the files at *indices* from the session."""
+        indices = sorted(set(indices), reverse=True)
         if not indices:
             return
 

@@ -183,9 +183,10 @@ class SensorSidebar(BaseSidebar):
         self.layout.addWidget(self.cast_removal_header)
         self.cast_removal_slider = CompactSlider("Cast Removal", 0.0, 1.0, self.state.config.exposure.cast_removal_strength)
         self.cast_removal_slider.setToolTip(
-            "Cast Removal: balances each color layer against the frame's own grays, so neutrals stay "
-            "neutral from deep shadows through highlights. 0 = off, 1 = full."
-            "<br><br>On a color negative it defeats the orange mask and starts at 1. On a slide it "
+            "Cast Removal: removes an overall color cast by balancing each color layer against the "
+            "frame's own grays, so neutrals stay neutral from deep shadows through highlights. "
+            "0 = off, 1 = full."
+            "<br><br>On a color negative it starts at 1, and leaves never count as gray. On a slide it "
             "starts at 0 and corrects a faded original's crossover — a slide's cast can be the "
             "photograph, so ask for it rather than getting it. Hidden for B&W Negative, which "
             "collapses to one density and has no layers to balance."

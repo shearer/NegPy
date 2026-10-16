@@ -23,7 +23,7 @@ from negpy.desktop.view.sidebar.history import HistoryPanel
 from negpy.desktop.view.sidebar.metadata import MetadataSidebar
 from negpy.desktop.view.styles.color_vision import palette_for
 from negpy.desktop.view.styles.fonts import ui_font_family
-from negpy.desktop.view.styles.templates import EditedDot
+from negpy.desktop.view.styles.templates import CLIPPING_SWEEP, EditedDot, gradient_icon
 from negpy.desktop.view.styles.theme import THEME
 from negpy.desktop.view.widgets.choice_button import SegmentedChoice
 from negpy.desktop.view.widgets.charts import PhotometricCurveWidget, StepWedgeWidget, VectorscopeWidget, WaveformWidget, ZoneStripWidget
@@ -271,6 +271,7 @@ class RightPanel(QWidget):
         self.analysis_section = make_section(repo, "Analysis", "analysis", analysis_content, "fa5s.chart-bar", persist=False)
         self.analysis_section.expanded_changed.connect(lambda checked: repo.save_global_setting(self._analysis_expanded_setting(), checked))
         self.clipping_btn = self.analysis_section.add_header_toggle("fa5s.adjust", "Clipping Overlay")
+        self.clipping_btn.setIcon(gradient_icon("fa5s.adjust", CLIPPING_SWEEP))
         self.clipping_btn.setChecked(self.controller.state.clipping_overlay)
         self.clipping_btn.toggled.connect(self.controller.toggle_clipping_overlay)
         self.zone_highlight_btn = self.analysis_section.add_header_toggle("fa5s.highlighter", "Zone Highlight")
@@ -621,7 +622,7 @@ class RightPanel(QWidget):
         )
         self.zone_highlight_btn.setToolTip(
             tooltip_with_shortcut(
-                "Zone Highlight: hover a zone strip cell to light up its pixels on the frame", "toggle_zone_hover_highlight"
+                "Zone Highlight: hover a zone strip cell to show that zone alone on the frame", "toggle_zone_hover_highlight"
             )
         )
 

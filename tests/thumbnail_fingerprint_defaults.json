@@ -162,6 +162,8 @@
    "locked_floors": "[0.0, 0.0, 0.0]",
    "locked_neutral_axis": "null",
    "luma_range_clip": "0.0",
+   "meter_key": "\"\"",
+   "meter_rect": "null",
    "narrowband_scan": "false",
    "positive_source": "false",
    "process_mode": "\"Color Negative\"",
@@ -205,5 +207,5 @@
    "vanadium_strength": "0.0"
   }
  },
- "render_version": 4
+ "render_version": 7
 }

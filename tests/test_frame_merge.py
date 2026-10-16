@@ -232,7 +232,7 @@ def _finish(tmp_path, monkeypatch, results, trash=True):
     from negpy.desktop.controller import AppController
 
     trashed: list = []
-    monkeypatch.setattr("negpy.desktop.controller._move_to_trash", lambda p: trashed.append(p) or True)
+    monkeypatch.setattr("negpy.desktop.controller.move_to_trash", lambda p: trashed.append(p) or "")
     ctrl = MagicMock()
     ctrl.session.repo = _repo(tmp_path)
     ctrl._frame_merge_trash = trash

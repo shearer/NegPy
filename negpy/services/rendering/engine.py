@@ -38,7 +38,7 @@ from negpy.features.toning.processor import ToningProcessor
 from negpy.features.lab.logic import apply_clahe
 from negpy.features.lab.processor import PhotoLabProcessor
 from negpy.features.finish.processor import FinishProcessor, rebate_tone
-from negpy.kernel.system.config import APP_CONFIG
+from negpy.kernel.system.config import APP_CONFIG, render_scale_factor
 from negpy.services.view.coordinate_mapping import CoordinateMapping
 
 logger = get_logger(__name__)
@@ -131,7 +131,7 @@ class DarkroomEngine:
 
         if context is None:
             context = PipelineContext(
-                scale_factor=max(h_orig, w_cols) / float(self.config.preview_render_size),
+                scale_factor=render_scale_factor(img.shape),
                 original_size=(h_orig, w_cols),
                 process_mode=settings.process.process_mode,
             )
@@ -190,6 +190,7 @@ class DarkroomEngine:
             geometry_key,
             settings.process.analysis_buffer,
             settings.process.analysis_rect,
+            settings.process.meter_rect,
             settings.process.luma_range_clip,
             settings.process.color_range_clip,
             settings.process.use_luma_average,

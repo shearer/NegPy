@@ -59,7 +59,7 @@ from negpy.desktop.view.frame_merge_action import (
     merge_to_tiff,
     mergeable_in,
 )
-from negpy.desktop.view.keyboard_shortcuts import _close_roll, _reset_roll, _reset_selected, close_roll_label
+from negpy.desktop.view.keyboard_shortcuts import _close_roll, _reset_roll, _reset_selected, close_roll_label, remove_from_roll
 from negpy.features.hdr.logic import anchor_choices
 from negpy.features.hdr.models import hdr_frame_paths
 from negpy.desktop.view.widgets.elided_label import ElidedLabel
@@ -78,6 +78,7 @@ from negpy.desktop.view.styles.templates import (
 from negpy.desktop.view.styles.theme import THEME, scene_color
 from negpy.desktop.view.widgets.granular_settings_dialog import open_apply_dialog, open_paste_dialog, open_sync_bounds_dialog
 from negpy.desktop.view.sidecar_action import LABEL as SIDECAR_LABEL, load_edit_from_sidecar
+from negpy.desktop.view.file_actions import SHOW_LABEL, TRASH_LABEL, move_selected_to_trash, show_current_in_folder
 from negpy.desktop.view.widgets.rgb_triplet_dialog import open_triplet_dialog
 from negpy.desktop.view.widgets.roll_settings_dialog import RollSettingsDialog
 from negpy.services.assets import rolls
@@ -494,6 +495,10 @@ class ThumbnailGridView(QListView):
         self._pre_press_selection: set[QPersistentModelIndex] = set()
         self._placing_scenes = False
         self._scene_bands: list[tuple[int, int, int, QRect]] = []  # (ordinal, first row, last row, band)
+        # Hover tracks the pointer, not only a scroll. The macOS style turns on neither, so a
+        # plain move never reaches the view.
+        self.setMouseTracking(True)
+        self.viewport().setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         # Reserve the vertical scrollbar permanently so the viewport width is stable. Otherwise
         # scaling toggles the scrollbar, which changes the width, flips the column count back
         # and flickers.
@@ -1598,7 +1603,8 @@ class FileBrowser(QWidget):
         # what is loaded would re-offer it every poll: hash it, turn it away, repeat.
         existing = {f["path"] for f in self.session.state.uploaded_files} | self.session.state.duplicate_paths
 
-        new_files = FolderWatchService.scan_for_new_files(folder_path, existing)
+        removed = rolls.excluded_paths(self.session.repo, [folder_path])
+        new_files = [p for p in FolderWatchService.scan_for_new_files(folder_path, existing) if not rolls.is_excluded_key(p, removed)]
         if new_files:
             self.controller.request_asset_discovery(new_files, hot_folder=True)
 
@@ -1870,8 +1876,20 @@ class FileBrowser(QWidget):
         if state.active_roll_id:
             self._add_scene_menu(menu, [state.uploaded_files[i] for i in targets], multi)
         menu.addSeparator()
+        if not multi:
+            menu.addAction(label_with_shortcut(SHOW_LABEL, "show_in_folder")).triggered.connect(
+                lambda: show_current_in_folder(self.controller)
+            )
+        menu.addAction(label_with_shortcut(TRASH_LABEL, "move_to_trash")).triggered.connect(
+            lambda: move_selected_to_trash(self, self.controller)
+        )
+        menu.addSeparator()
         unload_label = "Unload Selected…" if multi else "Unload…"
         menu.addAction(unload_label).triggered.connect(self._on_remove_from_menu)
+        if state.active_roll_id:
+            menu.addAction(label_with_shortcut("Remove from Roll…", "remove_from_roll")).triggered.connect(
+                lambda: remove_from_roll(self, self.controller)
+            )
         return menu
 
     def _add_scene_menu(self, menu: QMenu, frames: List[dict], multi: bool) -> None:

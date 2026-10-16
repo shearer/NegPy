@@ -236,6 +236,22 @@ PAPER_PROFILES: Dict[str, PaperProfile] = {
         base_tint_cmy=(-0.003, -0.003, 0.005),
         dye_matrix=_ENDURA_DYE,
     ),
+    # ── Color print film (kind "ra4": the kind gates the C-41 mode) ─────────
+    # Fitted to Kodak H-1-2383 (Status A R/G/B) with the `print` fit, which scales the
+    # projection Dmax (near 4) into the paper range. The datasheet draws one shared base, so
+    # no tint. No 2383 dye coupling is published as a matrix, so it borrows Endura's estimate.
+    "kodak_2383": PaperProfile(
+        label="Kodak Vision Color Print 2383",
+        kind="ra4",
+        d_max=2.29,
+        d_min=0.065,
+        toe_sharpness_base=2.65,
+        shoulder_sharpness_base=2.86,
+        paper_midtone_gamma=-0.019,
+        paper_gamma_width=0.31,
+        channel_gamma=(1.034, 1.0, 0.989),
+        dye_matrix=_ENDURA_DYE,
+    ),
 }
 
 

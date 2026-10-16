@@ -15,7 +15,8 @@ If Windows blocks the default data folder, NegPy suggests `%LOCALAPPDATA%\NegPy\
 ### Screen layout
 
 *   **Left, the film strip**: your frames as a contact sheet, with import, sorting and triage tools.
-*   **Center, the canvas**: the live preview. Scroll or pinch to zoom, drag to pan. The bottom toolbar holds navigation, zoom (**Fit to Window**, 25–400%, **HQ Preview**), rotate/flip (on every selected frame), **Tools** (arms any canvas tool: crop, straighten, the pickers, masks, retouching), undo/redo, the **Print** menu (Before / After and the peeks below) and **Overlays** (Zone Overlay, Clipping Overlay, Printing Notes, Grain Focuser). An armed canvas tool shows its use, its slider and **Done** on the toolbar; its name opens the same menu to switch tools. The **⋯** menu holds every action, including **Preferences…** (§15). Right-click the toolbar for **Edit Toolbar…**. Right-click the image for **Reset View**, **Sticky Zoom**, the pickers, copy/paste settings, **Reset Settings**, **Reset to Roll Settings** and **Unload** (drop the frame from the session; its edit stays).
+*   **Center, the canvas**: the live preview. Scroll or pinch to zoom, drag to pan, double-click to switch between fit and 100% at that spot. Zoomed in, a navigator in the lower right shows the visible part and the zoom; click or drag it to move the view. The bottom toolbar holds navigation, zoom (**Fit to Window**, 25–400%, **HQ Preview**), rotate/flip (on every selected frame), **Tools** (arms any canvas tool: crop, straighten, the pickers, masks, retouching), undo/redo, the **Print** menu (Before / After and the peeks below) and **Overlays** (Zone Overlay, Clipping Overlay, Printing Notes, Grain Focuser, Probe at Cursor, Frame Info). An armed canvas tool shows its use, its slider and **Done** on the toolbar; its name opens the same menu to switch tools. The **⋯** menu holds every action, including **Preferences…** (§15). Right-click the toolbar for **Edit Toolbar…**. Right-click the image for **Reset View**, **Sticky Zoom**, the pickers, copy/paste settings, **Reset Settings**, **Reset to Roll Settings** and **Unload** (drop the frame from the session; its edit stays).
+*   **Frame Info**: `I` cycles the corner pills. **Off**; **Basic**: file name, scan size, film mode; **Full**: adds the frame's place in the strip, film, camera and lens, the soft-proof profile, the export size and the zoom.
 *   **Right, the controls**: tabs **Roll** / **Frame** / **Metadata** / **Gear** / **Export** / **Scan**. **Roll** and **Frame** have a pinned **Analysis** readout; **Frame** has its own row of tabs. Only Roll and Frame change the render.
 
 With nothing open, the canvas offers **Load Scans…** and **Take the Tour**.
@@ -32,7 +33,7 @@ Drag a panel by its top edge to float it; its pin button docks it. **Shift+H** h
 
 ### Before / After
 
-**Before / After** in the **Print** menu (or `\`) splits the canvas: left is the auto baseline (same film process, crop and rotation, every creative control at default), right is your edit. It stays up while you edit. `\`, `Esc`, a frame change, a peek or the test strip closes it.
+**Before / After** in the **Print** menu (or `\`) splits the canvas: left is the auto baseline (same film process, crop and rotation, every creative control at default), right is your edit. It stays up while you edit. `\`, `Esc`, a frame change, a peek or the test strip closes it. Hold `\` instead to see the whole frame as the baseline until you let go.
 
 ### Reference view
 
@@ -46,7 +47,7 @@ Drag a panel by its top edge to float it; its pin button docks it. **Shift+H** h
 
 **Embedded** in the **Print** menu (or `P`) shows the camera's own JPEG at your crop and rotation. NegPy uses nothing from it. Scanner TIFFs and most converter DNGs have none. It closes like Peek Negative.
 
-`Esc` closes any peek, the split or a test strip.
+`Esc` closes any peek, the split or a test strip. Hold a peek key (`N`, `M`, `P`) to peek only while it is down.
 
 ### The workflow
 
@@ -99,6 +100,8 @@ On a **frame** card (Geometry, Filtration, Tone, Lab, Alternative Processes, Ton
 ### The tab header
 
 Tabs with several cards (Roll, Exposure, Look, Finish, Metadata) have a bar that reads **3 of 5 cards edited**. Its buttons act on every card: reset (asks first), **Reset to Roll**, one roll picker for the whole tab, and collapse/expand.
+
+**Pick Better** (the red-green-blue balance scale at the left of the Exposure tab's bar) tunes Filtration, Tone and Paper Response: a separate window opens — a notch smaller than the main window — with three equal frames in a row: the current edit in the center, bracketed by the two candidates (the stronger on the left, the weaker on the right). Each frame is captioned above: "A" over the stronger left, "Skip" over the center and "B" over the weaker right. A hover draws a red ring around the frame under the cursor, in the Film Strip's selection style. The control the pair tunes shows as its name above the center "Skip" caption, prefixed by the round number, and stays there the whole time; the candidate values are not shown. Click a candidate to keep it; the next pair fills the same window. A left or right pick briefly shows the applied control's name and its delta above the frames. Click the center current photo to reject both candidates and move on to the next control. A **Difference** slider widens or narrows the spread between A and B live and keeps its setting for the next pair. The first eleven rounds each propose one control in the order set by **Custom Routing** — Grade, Density, Temperature, Dye Separation, Highlights Grade, Shadows Grade, Highlights Density, Shadows Density, Preflash, Snap and Toe by default — and two consecutive rounds never propose the same control; the later rounds cycle back through them, each visit a finer step. **Custom Routing** opens a window that reorders, by drag and drop, which control each round proposes, with a Randomize toggle that shuffles that order on each run — the order you set is the one used when Randomize is off, so turning it off restores it. The **OK** button (bottom-right) ends the mode; **Undo** re-shows the previous pair; the balance-scale toggle or `Esc` also ends it, keeping the last chosen settings. Luma Range Clip, Color Clip, Crop, Crosstalk, Cast Removal, Hue Trim and the Black and White Points stay at their current values.
 
 ### Menu bar (macOS)
 
@@ -175,7 +178,8 @@ The Film Strip button row:
 *   **Apply (clone)**: copies the chosen aspects of the current frame's settings to selected frames or the whole roll. Crop and rotation stay per image.
 *   **Roll Settings**: writes gear, capture, place, process and scanning metadata to the frame, a selection or the whole roll. **Load** fills the fields from a metadata preset; tick the groups to write. An empty Analog Gear is matched from the folder name.
 *   **Save as Roll…**: keeps the loaded frames as a roll ([Rolls that are not folders](#rolls-that-are-not-folders)).
-*   **Unload…**: drops the active frame or selection.
+*   **Unload…**: drops the active frame or selection from the Film Strip. It is back the next time the roll opens.
+*   **Remove from Roll…** (right-click, with a roll open): takes the frame or selection out of the roll for good, with its scene, card locks and own edit in that roll. The file and its shared edit stay. A file in the roll's own folder is skipped when the folder is opened again, until you add it back with **Add Files…**. A half-frame scan goes as one file.
 *   **Show Scenes**: edges each frame in its scene's color ([Scenes](#scenes)).
 *   **Sort**: Name or Date, or **Scene** once the loaded roll has one, ascending or descending.
 *   **Sheet filter**: *All Frames*, *Keepers Only*, *Hide Rejected* or *Unmarked Only*. **Advance After Marking** in the same menu moves on after a Keeper or Reject mark. `Home` and `End` jump to the first and last frame.
@@ -278,6 +282,8 @@ The right-click menu also has:
 *   **Update Thumbnail(s)**: re-renders the selection's thumbnails. **Update Thumbnails** on the toolbar re-renders every stale one in the roll. Sharpening, chroma denoise, dust and heal repairs, demosaic, display profile and soft proof do not make a thumbnail stale.
 *   **Reset Roll to Defaults…**, and per-frame export.
 *   **Edit Independently in This Roll** / **Use the Shared Edit Again** ([Rolls that are not folders](#rolls-that-are-not-folders)).
+*   **Show in Folder**: opens the system file manager on the frame's folder, with the file selected.
+*   **Move to Trash…**: moves the selection's files and sidecars to the system Trash and unloads them; the edits stay, so a restored file keeps its edit. A file on a drive with no Trash stays. Stitches, HDR merges, trichromes and half-frame scans must be dissolved first.
 
 #### Scenes
 
@@ -331,13 +337,13 @@ A 21-step wedge printed through the current curve, alternative process and tonin
 
 #### Zone strip
 
-Ten cells on the Adams scale (**0** paper black, **V** 18% mid-gray); opacity shows how much of the frame lands in each. The end cells turn **red** when shadows block up or highlights blow. Click a cell to start a Zone placement. The strip is disabled on a slide or a Positive frame.
+Eleven cells on the Adams scale (**0** paper black, **V** 18% mid-gray, **X** paper white), each zone rounded to the nearest as the Zone Overlay counts it; opacity shows how much of the frame lands in each. The two cells at each end turn **red** when shadows block up or highlights blow. Click a cell to start a Zone placement. The strip is disabled on a slide or a Positive frame.
 
-Double-click the strip, or press `Shift+Z`, to toggle the canvas **Zone Overlay**, which labels every region of the print with its zone. Hovering a cell lights up the pixels that print in that zone; the highlighter icon in the Analysis header toggles this.
+Double-click the strip, or press `Shift+Z`, to toggle the canvas **Zone Overlay**. While it is up the canvas toolbar shows its own row: the look, a legend with each zone's share of the frame, and **✕** (or `Esc`) to close it. **Color** tints each zone over the photo (I–IV cool, V gray, VI–IX warm, in your Color vision palette) and shows paper black and paper white as solid black and white; **Grayscale** draws the print in eleven gray steps; both number the larger regions. **Grid** lays a coarse grid over the photo with one numeral per region, red at paper black and paper white. Hovering the frame outlines the pointer's zone and rings its legend cell. Hovering a legend cell or a strip cell shows that zone alone, the rest of the frame dimmed, with the Zone Overlay on or off; the highlighter icon in the Analysis header turns this off for the strip.
 
 #### Probe
 
-A spot densitometer: hover the image for per-channel density above film base (ΔD), the print density and its zone.
+A spot densitometer: hover the image for per-channel density above film base (ΔD), the print density and its zone. **Probe at Cursor** (**Overlays**, or `Shift+I`) shows the same reading in a chip beside the pointer.
 
 #### Zone placement
 
@@ -418,7 +424,8 @@ Color timing, like enlarger dichroic filters. The **Global / Shadows / Highlight
 *   **Auto Density**: meters each frame's midtone and anchors print brightness there.
 *   **Auto Grade**: sets the grade partly from the frame's textured density range, harder when textured shadows need it to reach black (Shadow Reach). It opens the shadows of a contrasty frame (Shadow Hold) and holds textured highlights off paper white (Highlight Hold).
 *   **Auto Density and Grade**: turns both helpers on or off together.
-*   **Set Targets…**: the brightness and contrast the helpers aim for, for all frames.
+*    **Set Targets…**: the brightness and contrast the helpers aim for, for all frames. Confirming a changed target warns that it moves every frame, including ones not yet baked, and that baking a frame first keeps it fixed; a **Don't show again** box stops the warning.
+*    **Bake Auto Density/Grade**: writes the metered Auto Density and Auto Grade into the frame's settings and turns both helpers off, so the frame keeps the look the helpers chose without them and does not move when the targets change.
 *   With a helper on, its sliders show what prints: **Print Density** the metered density, **ISO-R Grade** the grade the frame prints at, **Highlights Density** with the automatic burn. Moving one trims the helper; a double-click returns to the helper's choice.
 
 **Test strip** (`Shift+T`): a 5×5 grid, Print Density rising left to right, ISO-R Grade softening top to bottom. Click a patch to keep it; `Escape` clears it. While a proof shows, the 90° **rotate** buttons and `[` / `]` turn the ladder, not the image.
@@ -441,7 +448,7 @@ Color timing, like enlarger dichroic filters. The **Global / Shadows / Highlight
 
 The paper's characteristic curve. Its own **Global / R / G / B** selector applies the curve controls to all layers or as per-dye-layer trims.
 
-*   **Paper**: a bundled paper (RA4 in Color Negative, B&W papers in B&W Negative) that sets the curve; the other controls trim on top. *Neutral* gives the defaults. Each B&W paper has its own lith color (§6.2).
+*   **Paper**: a bundled paper (RA4 and Kodak 2383 print film in Color Negative, B&W papers in B&W Negative) that sets the curve; the other controls trim on top. *Neutral* gives the defaults. Each B&W paper has its own lith color (§6.2).
 *   **Dye Separation** (0.5 to 1.5, hidden in B&W Negative): saturation through the paper's dyes, easing off at toe and shoulder. 1.0 is off; lower values pull toward neutral. **Chroma** (Look tab) scales color evenly instead.
     *   **Separation Damping** (0 to 1): higher keeps the push on muted color and eases it on saturated color. Grayed out at Dye Separation 1.0.
 *   **Paper White**: simulates paper base density, so whites print at about 0.93.
@@ -484,7 +491,7 @@ What a lab scanner (Frontier or Noritsu) does automatically.
 
 *   **Chroma** (0.0 to 2.0): even color scale after decode; 1.0 is unchanged, 0 grayscale. For print-like saturation use **Dye Separation**.
 *   **Skin Protection** (0.0 to 1.0, default 0.5): caps skin-hued chroma; 1.0 leaves skin matte, 0 is off. Red coats, sunsets and brick stay out; wood, tan leather and sand soften with it.
-*   **Chroma Denoise** (0.0 to 5.0): smooths color noise, mainly in shadows; luminance grain stays.
+*   **Chroma Denoise** (0.0 to 5.0): removes color speckle finer than this radius (px of the full-size scan) and keeps sharp color edges; luminance grain stays.
 
 **Detail:**
 
@@ -653,6 +660,7 @@ A **work print** is a named version of this frame, like the test prints kept on 
 *   **Save Work Print** (**Ctrl+Shift+S**) keeps the current edit under a name.
 *   **Click** one to make it live. That is an edit, so **Ctrl+Z** restores the previous state.
 *   **Right-click** for **Export This Version…**, **Rename…** or **Delete**.
+*   **Load Metadata** (off by default; a global setting, the same for every frame and roll) restores a work print's saved metadata when you load it; off keeps the metadata on screen now and ignores the print's.
 
 Work prints are never pruned. They live in the database, not in `.negpy` sidecars.
 
@@ -744,7 +752,7 @@ CAMERA_SCANNING.md has a workflow for each way to build and assign a profile.
 
 To tune a matrix, adjust its six off-diagonal terms in the editor and save it as your own, named after the *combination* ("Gold 200 + Spectracolor"). Working profiles are welcome [upstream](CROSSTALK.md#contributing-a-matrix).
 
-**Dye balance: Cast Removal** (0.0 to 1.0, color only): balances each layer against the frame's own grays, so neutrals stay neutral from shadows to highlights. On Color Negative it removes the orange mask and starts at 1.0; on Transparency it starts at 0, for a faded slide's crossover.
+**Dye balance: Cast Removal** (0.0 to 1.0, color only): removes an overall color cast by balancing each layer against the frame's own grays, so neutrals stay neutral from shadows to highlights. On a negative, leaves never count as gray, so a forest keeps its greens. It starts at 1.0 on Color Negative and at 0 on Transparency, for a faded slide's crossover.
 
 **Light source:**
 
@@ -804,7 +812,7 @@ How this frame is measured into a positive's tonal bounds.
 
 **Analysis** sets where the black and white points are metered.
 
-*   **Analysis Buffer** (0.0 to 0.25): insets the measurement window so rebate, sprocket holes and scanner borders do not skew it.
+*   **Analysis Buffer** (0.0 to 0.25): insets the measurement window so rebate, sprocket holes and scanner borders do not skew it. With no crop, the window is the picture Auto Crop would keep when the film sits in a holder or on bare light, so the holder never sets the exposure.
 *   **Reanalyze Frame**: measures this frame again from its current crop, buffer and region.
 *   **Draw Region** / **Clear Region**: draw a freehand region to meter *exactly* that area, in place of the buffer. Double-click inside to confirm.
 *   **Clipping**: the print's shadow and highlight clipping shares, as in the Analysis panel's row.
@@ -910,7 +918,7 @@ Optional original shutter, aperture and ISO. Click the lock to edit a free-text 
 
 A live view of what goes into the file. **Description…** picks the fields joined into EXIF `ImageDescription` (default: camera, lens, film stock, ISO); the choice becomes the default for frames without their own.
 
-Capture gear goes to standard EXIF and the digitizing rig to `negpy:Scan*` XMP tags; with gear unset, your scanner or DSLR stays in EXIF. Other XMP tags: `photoshop:DateCreated` (with `negpy:CaptureDatePrecision`), `photoshop:City`/`State`/`Country`, `exif:GPS*` (the only GPS in a TIFF), `negpy:DevelopmentDilution`/`DevelopmentTime`/`DevelopmentTemperature`, `negpy:CaptureRoll`/`CaptureFrame`.
+Capture gear goes to standard EXIF and the digitizing rig to `negpy:Scan*` XMP tags; with gear unset, your scanner or DSLR stays in EXIF. Other XMP tags: `photoshop:DateCreated` (with `negpy:CaptureDatePrecision`), `photoshop:City`/`State`/`Country`, `exif:GPS*` (the only GPS in a TIFF), `negpy:DevelopmentDilution`/`DevelopmentTime`/`DevelopmentTemperature`, `negpy:CaptureRoll`/`CaptureFrame`. A star rating set in the camera carries over as `xmp:Rating`.
 
 ---
 
@@ -1055,7 +1063,7 @@ Capture film directly into NegPy. The **Scanner** card picks the scanner; the ta
 *   **Debug log** (nkscan; Off, Debug, Trace): writes `nkscan.log` in the NegPy folder. For a bug report, set Trace, reproduce the problem and attach the file.
 *   **Sleep**: while a scan runs, NegPy keeps macOS and Windows from going to sleep. On Linux, turn off automatic suspend before a long roll.
 
-**pyOpticfilm (Plustek)**: the **OpticFilm 8200i SE** (`07b3:1825`) and **8100 V2** (`07b3:1824`) scan; for other models try **SANE** on Linux and macOS. **IR** comes in the same pass. On Windows, bind the device to **WinUSB** with Zadig first ([PLUSTEK_WINDOWS.md](PLUSTEK_WINDOWS.md)). From source, install with `uv sync --group plustek` or `pip install negpy[plustek]`.
+**pyOpticfilm (Plustek)**: the **OpticFilm 8200i SE** (`07b3:1825`), **8100 V2** (`07b3:1824`), **8300i SE** (`07b3:181f`) and **7600i v1** (`07b3:0c3b`) scan; for other models try **SANE** on Linux and macOS. Needs pyopticfilm **1.3.6** or later. **IR** comes in the same pass (on the 7600i v1, at 3600 and 7200 dpi only). Multi-Pass and Prescan are on the GL128 models. On Windows, bind the device to **WinUSB** with Zadig first ([PLUSTEK_WINDOWS.md](PLUSTEK_WINDOWS.md)). From source, install with `uv sync --group plustek` or `pip install negpy[plustek]`.
 
 **Nikon Coolscan (nkscan)**: needs no SANE and ships in the release builds; from source, see [CONTRIBUTING.md](../CONTRIBUTING.md). On Linux, USB needs a udev rule for vendor `04b0`; FireWire/SCSI needs the `sg` module.
 
@@ -1089,7 +1097,8 @@ Copy-stand capture with a camera in **PC Remote** mode over USB (macOS/Linux): w
 *   **Live View**: click the image to aim the focus magnifier. Turn the focus ring past best focus, then back until the **Focus meter** reads **at peak**. ISO, shutter and aperture are set from its toolbar, or locked by a calibrated RGB preset.
 *   **Histogram** and **Zebras**: the frame's RGB histogram, and hatching on pixels at the top (red) and bottom (blue) of the preview range. The preview clips before the RAW does, so a zebra is an early warning.
 *   **Meter** (white-light and camera-only scanning): one RAW probe sets the shutter so the region that must not clip (a negative's clear base, a slide's brightest highlights) lands just under clipping. The white-light preset's film type decides which. A clipped reading steps down two stops; meter again.
-*   **Scan** and **Retake**: **Scan** shoots the next frame, auto-numbered, and imports it; **Retake** shoots the last frame again. In the Live View window, `S` scans and `R` retakes.
+*   **Scan** and **Retake**: **Scan** shoots the next frame, auto-numbered, and imports it; **Retake** (the redo arrow beside **Live View**) shoots the last frame again. In the Live View window, `S` scans and `R` retakes.
+*   **Keep Light On** (the bulb beside **Retake**, off by default): the Scanlight goes dark after each scan; this lights it again with the framing light, so you can frame the next shot on the camera's screen. Live View lights it again without this toggle.
 *   **Narrowband**: RGB-lit scans render more saturated; the Calibration card's **Narrowband** toggle corrects this.
 
 <!-- panel:scan_light -->
@@ -1147,7 +1156,7 @@ Application-wide settings: **⋯** menu → **Preferences…** or `Ctrl + ,`. Ch
 
 ### Accessibility
 
-*   **Color vision** (default **Standard**): colors for marks told apart by color alone (dust overlay, dodge and burn masks, zone highlight, clipping overlay). *Protanopia / deuteranopia*, *Tritanopia* and *Achromatopsia* use colors from the Okabe–Ito palette.
+*   **Color vision** (default **Standard**): colors for marks told apart by color alone (dust overlay, dodge and burn masks, Zone Overlay, clipping overlay). *Protanopia / deuteranopia*, *Tritanopia* and *Achromatopsia* use colors from the Okabe–Ito palette.
 
 ### Performance
 

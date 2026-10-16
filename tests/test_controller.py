@@ -18,7 +18,7 @@ from negpy.desktop.controller import AppController
 from negpy.desktop.session import DesktopSessionManager, AppState, ToolMode
 from negpy.desktop.settings_catalog import rows_for_fields
 from negpy.desktop.workers.export import ExportTask, resolve_export_target_path
-from negpy.services.rendering.image_processor import ArmedCrop
+from negpy.services.rendering.image_processor import ArmedCrop, MeterBox
 from negpy.features.geometry.logic import autocrop_detection_key
 from negpy.domain.models import (
     ColorSpace,
@@ -2690,6 +2690,46 @@ class TestAppController(unittest.TestCase):
         metrics = {"autocrop_resolved": ArmedCrop((0.05, 0.04, 0.99, 0.98), "stale-key", None, False)}
 
         self.controller._freeze_resolved_auto_crop(metrics)
+
+        self.mock_session_manager.update_config.assert_not_called()
+
+    def _meter_box(self, rect=(0.2, 0.17, 0.8, 0.83), geometry_key=None):
+        geometry_key = geometry_key or autocrop_detection_key(self.controller.state.config.geometry)
+        return MeterBox(rect, geometry_key + "|1.50", geometry_key)
+
+    def test_meter_freeze_stores_the_rect_the_render_resolved(self):
+        box = self._meter_box()
+        self.controller._freeze_resolved_meter({"meter_resolved": box})
+
+        call = self.mock_session_manager.update_config.call_args
+        self.assertEqual((call.args[0].process.meter_rect, call.args[0].process.meter_key), (box.rect, box.key))
+        self.assertFalse(call.kwargs["render"])
+        self.assertFalse(call.kwargs["record_history"])
+
+    def test_meter_freeze_drops_bounds_measured_without_the_box(self):
+        """The render already metered inside the box; the stored bounds still hold the holder."""
+        proc = replace(self.controller.state.config.process, local_floors=(-2.0, -2.1, -2.2), local_ceils=(-0.5, -0.6, -0.7))
+        self.controller.state.config = replace(self.controller.state.config, process=proc)
+
+        self.controller._freeze_resolved_meter({"meter_resolved": self._meter_box()})
+
+        self.assertFalse(self.mock_session_manager.update_config.call_args.args[0].process.is_local_initialized)
+
+    def test_meter_freeze_ignores_a_proxy_or_one_diptych_half(self):
+        for flag in ("interactive", "ephemeral", "diptych"):
+            self.controller._freeze_resolved_meter({"meter_resolved": self._meter_box(), flag: True})
+        self.mock_session_manager.update_config.assert_not_called()
+
+    def test_meter_freeze_drops_a_result_the_user_has_moved_past(self):
+        self.controller._freeze_resolved_meter({"meter_resolved": self._meter_box(geometry_key="stale")})
+        self.mock_session_manager.update_config.assert_not_called()
+
+    def test_meter_freeze_skips_a_frame_cropped_since(self):
+        box = self._meter_box()
+        geometry = replace(self.controller.state.config.geometry, crop_rect=(0.1, 0.1, 0.9, 0.9))
+        self.controller.state.config = replace(self.controller.state.config, geometry=geometry)
+
+        self.controller._freeze_resolved_meter({"meter_resolved": box})
 
         self.mock_session_manager.update_config.assert_not_called()
 
@@ -5744,6 +5784,26 @@ class TestCompareFlatPeekInteraction(unittest.TestCase):
         # Working space, so the display conversion runs; the proof does not.
         self.assertFalse(metrics["splash"])
         self.assertFalse(metrics["proof"])
+
+    def test_negative_peek_crops_like_the_render(self):
+        """The crop margin scales with the buffer the render crops, not the full-res file."""
+        import numpy as np
+
+        from negpy.features.geometry.logic import get_manual_rect_coords
+        from negpy.kernel.system.config import APP_CONFIG
+
+        source = np.full((400, 600, 3), 0.5, dtype=np.float32)
+        state = self.controller.state
+        state.preview_raw = source
+        state.original_res = (4000, 6000)
+        rect = (0.1, 0.1, 0.9, 0.9)
+        state.config = replace(state.config, geometry=replace(state.config.geometry, crop_rect=rect, autocrop_offset=10))
+
+        self.controller.toggle_negative_peek(force=True)
+
+        scale = max(source.shape[:2]) / float(APP_CONFIG.preview_render_size)
+        y1, y2, x1, x2 = get_manual_rect_coords(source, rect, offset_px=10, scale_factor=scale)
+        self.assertEqual(state.peek_frame["base_positive"].shape[:2], (y2 - y1, x2 - x1))
 
     def test_leaving_the_negative_peek_re_renders_the_edit(self):
         self.controller.state.negative_peek = True

@@ -66,30 +66,34 @@ class LogNegativeBounds:
         self.ceils = ceils
 
 
+def _rect_roi(image_shape: tuple[int, ...], rect: tuple[float, float, float, float]) -> Optional[tuple[int, int, int, int]]:
+    """A normalized (x1, y1, x2, y2) rect as a pixel ROI; None for a degenerate one, so a stray click can't blank analysis."""
+    h, w = image_shape[:2]
+    x1, y1, x2, y2 = rect
+    roi = (int(min(y1, y2) * h), int(max(y1, y2) * h), int(min(x1, x2) * w), int(max(x1, x2) * w))
+    return roi if roi[1] - roi[0] >= 2 and roi[3] - roi[2] >= 2 else None
+
+
 def resolve_analysis_region(
     image_shape: tuple[int, ...],
     active_roi: Optional[tuple[int, int, int, int]],
     analysis_buffer: float,
     analysis_rect: Optional[tuple[float, float, float, float]],
+    meter_rect: Optional[tuple[float, float, float, float]] = None,
 ) -> tuple[Optional[tuple[int, int, int, int]], float]:
     """Resolve the (roi, buffer) the meters should read.
 
     A freehand `analysis_rect` (normalized in the transformed image) wins over the crop
     ROI + centered buffer: it maps directly to a pixel ROI and disables the symmetric
-    inset. Otherwise the crop `active_roi` and the `analysis_buffer` slider apply as before.
+    inset. Otherwise the crop `active_roi` and the `analysis_buffer` slider apply, and with
+    no crop the `meter_rect` stands in for one.
     """
     if analysis_rect is not None:
-        h, w = image_shape[:2]
-        x1, y1, x2, y2 = analysis_rect
-        roi = (
-            int(min(y1, y2) * h),
-            int(max(y1, y2) * h),
-            int(min(x1, x2) * w),
-            int(max(x1, x2) * w),
-        )
-        # Degenerate rect (zero area) is ignored so a stray click can't blank analysis.
-        if roi[1] - roi[0] >= 2 and roi[3] - roi[2] >= 2:
+        roi = _rect_roi(image_shape, analysis_rect)
+        if roi is not None:
             return roi, 0.0
+    if active_roi is None and meter_rect is not None:
+        return _rect_roi(image_shape, meter_rect), analysis_buffer
     return active_roi, analysis_buffer
 
 
@@ -331,15 +335,33 @@ def _rms_chroma(triplets: np.ndarray) -> np.ndarray:
     return np.sqrt(((r - g) ** 2 + (g - b) ** 2 + (r - b) ** 2) / 3.0)
 
 
+def _foliage_cells(norm_f: np.ndarray) -> np.ndarray:
+    """Cells in the foliage sector. In a frame with no grays the lowest-chroma cells are
+    desaturated leaves, and neutralizing them prints magenta (a printer's subject failure)."""
+    from negpy.features.exposure.models import EXPOSURE_CONSTANTS
+
+    c = EXPOSURE_CONSTANTS
+    dr = norm_f[:, 0] - norm_f[:, 1]
+    db = norm_f[:, 2] - norm_f[:, 1]
+    t, s = (dr + db) / 2.0, (dr - db) / 2.0
+    lo, hi = c["neutral_axis_foliage_hue"]
+    hue = np.degrees(np.arctan2(-s, t))
+    return (np.hypot(t, s) > float(c["neutral_axis_foliage_chroma"])) & (hue > float(lo)) & (hue < float(hi))
+
+
 def measure_neutral_axis_from_log(
     img_log: ImageBuffer,
     bounds: "LogNegativeBounds",
     roi: Optional[tuple[int, int, int, int]] = None,
     analysis_buffer: float = 0.0,
+    *,
+    exclude_foliage: bool = True,
 ) -> Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float], Optional[Tuple[float, float, float]], float]]:
     """Per-channel neutral axis: median raw-log density of the lowest-chroma pixels in a highlight, midtone and shadow band.
     Pass 1 uses a loose cap so a strong but correctable cast keeps the axis; its mid+shadow correction re-ranks chroma for a
-    strict pass 2. Returns (midtone, shadow, highlight or None, confidence in [0, 1]); None without a midtone or shadow set."""
+    strict pass 2. Returns (midtone, shadow, highlight or None, confidence in [0, 1]); None without a midtone or shadow set.
+    `exclude_foliage` drops foliage-sector cells first. Only a per-channel stretch makes the window's neutral a gray, so a
+    caller metering against the slide's fixed window passes False."""
     from negpy.features.exposure.models import EXPOSURE_CONSTANTS
 
     if roi:
@@ -355,6 +377,9 @@ def measure_neutral_axis_from_log(
     flat_log = img_log.reshape(-1, 3)
     norm_f = norm.reshape(-1, 3)
     luma_f = luma.reshape(-1)
+    if exclude_foliage:
+        keep = ~_foliage_cells(norm_f)
+        flat_log, norm_f, luma_f = flat_log[keep], norm_f[keep], luma_f[keep]
     chroma_f = _rms_chroma(norm_f)
 
     c = EXPOSURE_CONSTANTS

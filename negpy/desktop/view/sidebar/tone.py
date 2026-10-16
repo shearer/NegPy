@@ -3,9 +3,10 @@ from dataclasses import replace
 from PyQt6.QtWidgets import QDialog, QHBoxLayout, QVBoxLayout
 
 from negpy.desktop.auto_sliders import shown_values, stored_value
+from negpy.desktop.view.confirm import warn_targets_affect_unbaked
 from negpy.desktop.view.shortcut_registry import tooltip_with_shortcut
 from negpy.desktop.view.sidebar.base import BaseSidebar
-from negpy.desktop.view.styles.templates import ICON_BUTTON_WIDTH, hint_label, wrap_tooltip
+from negpy.desktop.view.styles.templates import ICON_BUTTON_WIDTH, TEST_STRIP_SWEEP, gradient_icon, hint_label, wrap_tooltip
 from negpy.desktop.view.styles.theme import THEME
 from negpy.desktop.view.widgets.choice_button import SegmentedChoice, ToggleMenuButton
 from negpy.desktop.view.widgets.sliders import CompactSlider, SliderGroup
@@ -86,9 +87,16 @@ class ToneSidebar(BaseSidebar):
             "Applies to every frame and is remembered between sessions."
         )
         targets_action.triggered.connect(self._open_targets_dialog)
+        self.auto_bake_action = self.auto_btn.choice_menu.addAction("Bake Auto Density/Grade")
+        self.auto_bake_action.setToolTip(
+            "Write this frame's metered Auto Density and Auto Grade into its settings and turn both "
+            "off, so it keeps the look the autos chose without them and is not shifted by a later target change."
+        )
+        self.auto_bake_action.triggered.connect(self._bake_auto_density_grade)
         self.auto_density_action.setChecked(conf.auto_exposure)
         self.auto_grade_action.setChecked(conf.auto_normalize_contrast)
         self.test_strip_btn = self._tool_toggle("mdi.view-grid-outline", "", self._test_strip_tooltip())
+        self.test_strip_btn.setIcon(gradient_icon("mdi.view-grid-outline", TEST_STRIP_SWEEP))
         self.test_strip_btn.setFixedWidth(ICON_BUTTON_WIDTH)
         self.test_strip_btn.clicked.connect(lambda checked: self.controller.toggle_test_strip(force=checked))
 
@@ -196,9 +204,20 @@ class ToneSidebar(BaseSidebar):
             values = dlg.values()
             apply_targets(values)
             self.controller.session.repo.save_global_setting("exposure_targets", values)
+            if any(abs(values[k] - self._targets_snapshot[k]) > 1e-6 for k in values):
+                warn_targets_affect_unbaked(self, self.controller.session.repo)
         else:
             apply_targets(self._targets_snapshot)
         self.controller.request_render(readback_metrics=True)
+
+    def _bake_auto_density_grade(self) -> None:
+        """Freeze this frame's metered Auto Density and Auto Grade into its settings, then turn both off.
+        The baked values are the sliders' shown values, so the print does not move."""
+        shown = shown_values(self.state.config, self._meters())
+        changes: dict = dict(shown)
+        changes["auto_exposure"] = False
+        changes["auto_normalize_contrast"] = False
+        self.update_config_section("exposure", render=True, persist=True, readback_metrics=True, **changes)
 
     def _channel_index(self) -> int:
         return self.ch_btn.currentIndex()
@@ -394,6 +413,8 @@ class ToneSidebar(BaseSidebar):
             merged = hdr_active(self.state.config.hdr)
             for action in (self.auto_density_action, self.auto_grade_action, self.auto_both_action):
                 action.setEnabled(not merged)
+            # Bake is a no-op when both autos are already off, and is unreachable on a merge (the auto button is off).
+            self.auto_bake_action.setEnabled(not merged and (conf.auto_exposure or conf.auto_normalize_contrast))
             self.auto_merged_hint.setVisible(merged)
 
             for i, fields in enumerate(self._channel_fields, start=1):

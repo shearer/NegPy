@@ -2253,14 +2253,29 @@ def autocrop_detection_key(geometry: GeometryConfig) -> str:
     )
 
 
+def meter_detection_key(geometry: GeometryConfig, shape: Tuple[int, ...]) -> str:
+    """autocrop_detection_key plus the source's aspect, since a half-frame split or a stitch puts
+    another picture under the same geometry."""
+    h, w = shape[:2]
+    return f"{autocrop_detection_key(geometry)}|{w / h:.2f}"
+
+
+def resolve_meter_rect(img: ImageBuffer, geometry: GeometryConfig, preview_size: float) -> Optional[Tuple[float, float, float, float]]:
+    """The picture box the meters read on a frame with no crop: the rect Auto Crop would keep, when the film
+    sits in an opaque holder or on bare light. None when the film fills the frame, which is metered whole."""
+    return resolve_autocrop_rect(img, geometry, preview_size, require_film_box=True)
+
+
 def resolve_autocrop_rect(
     img: ImageBuffer,
     geometry: GeometryConfig,
     preview_size: float,
+    require_film_box: bool = False,
 ) -> Optional[Tuple[float, float, float, float]]:
     """The auto crop as a normalized rect in transformed-image space; the caller freezes it, so later renders crop
     the same at any resolution. Runs at AUTOCROP_DETECT_RES in GeometryProcessor order (rot90 -> flips -> fine
-    rotation -> distortion -> keystone). Excludes Crop Offset, which get_manual_rect_coords adds per render; None when too small."""
+    rotation -> distortion -> keystone). Excludes Crop Offset, which get_manual_rect_coords adds per render; None when
+    too small, or with `require_film_box` when no film box stands out from a holder or bed."""
     h, w = img.shape[:2]
     det_s = min(1.0, AUTOCROP_DETECT_RES / max(h, w))
     if det_s < 1.0:
@@ -2284,6 +2299,8 @@ def resolve_autocrop_rect(
 
     rh, rw = tmp.shape[:2]
     if rh < 2 or rw < 2:
+        return None
+    if require_film_box and _detect_film_bounds(_normalize_detection_input(tmp, AUTOCROP_DETECT_RES)[0]) is None:
         return None
     y1, y2, x1, x2 = get_autocrop_coords(
         tmp,

@@ -66,7 +66,10 @@ class NormalizationProcessor:
         img_log = np.log10(np.clip(np.nan_to_num(image, nan=epsilon, posinf=1.0, neginf=epsilon), epsilon, None))
         # Shared prefilter, once for all five meters, with the ROI and buffer applied here. A
         # freehand analysis_rect overrides the crop ROI and centered buffer for the metered region.
-        an_roi, an_buffer = resolve_analysis_region(image.shape, context.active_roi, self.config.analysis_buffer, self.config.analysis_rect)
+        an_roi, an_buffer = resolve_analysis_region(
+            image.shape, context.active_roi, self.config.analysis_buffer, self.config.analysis_rect, self.config.meter_rect
+        )
+        region = (self.config.analysis_rect, self.config.meter_rect)
         prefiltered = prefilter_log_grid(image, an_roi, an_buffer)
         context.metrics["scan_clip_fractions"] = measure_clip_fractions(image, an_roi, an_buffer)
 
@@ -88,7 +91,7 @@ class NormalizationProcessor:
                 "log_bounds" not in context.metrics
                 or cached_buffer is None
                 or abs(cached_buffer - self.config.analysis_buffer) > 1e-5
-                or cached_rect != self.config.analysis_rect
+                or cached_rect != region
                 or cached_clip is None
                 or abs(cached_clip - self.config.luma_range_clip) > 1e-6
                 or cached_color_clip is None
@@ -109,7 +112,7 @@ class NormalizationProcessor:
             )
             context.metrics["log_bounds"] = analyzed
             context.metrics["log_bounds_buffer_val"] = self.config.analysis_buffer
-            context.metrics["log_bounds_rect_val"] = self.config.analysis_rect
+            context.metrics["log_bounds_rect_val"] = region
             context.metrics["log_bounds_clip_val"] = self.config.luma_range_clip
             context.metrics["log_bounds_color_clip_val"] = self.config.color_range_clip
             context.metrics["log_bounds_mode_val"] = context.process_mode
@@ -137,7 +140,7 @@ class NormalizationProcessor:
                 "shadow_log_refs" not in context.metrics
                 or cached_ref_buffer is None
                 or abs(cached_ref_buffer - self.config.analysis_buffer) > 1e-5
-                or cached_ref_rect != self.config.analysis_rect
+                or cached_ref_rect != region
                 or cached_ref_unmix != (self.config.crosstalk_strength, self.config.crosstalk_matrix, self.config.crosstalk_process)
             ):
                 context.metrics["shadow_log_refs"] = measure_shadow_refs_from_log(
@@ -146,7 +149,7 @@ class NormalizationProcessor:
                     0.0,
                 )
                 context.metrics["shadow_refs_buffer_val"] = self.config.analysis_buffer
-                context.metrics["shadow_refs_rect_val"] = self.config.analysis_rect
+                context.metrics["shadow_refs_rect_val"] = region
                 context.metrics["shadow_refs_crosstalk_val"] = (
                     self.config.crosstalk_strength,
                     self.config.crosstalk_matrix,

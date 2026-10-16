@@ -195,6 +195,11 @@ EXPOSURE_CONSTANTS: Dict[str, Any] = {
     # Pass-1 chroma ceiling: admits strong correctable casts, rejects saturated content.
     "neutral_axis_first_pass_cap": 0.55,
     "neutral_axis_min_pixels": 64,
+    # Foliage sector: cells whose offset from the stretched neutral exceeds this chroma at a
+    # hue in this range never enter a near-neutral set. Hue is atan2(-s, t) in degrees, with
+    # t = (dR + dB) / 2 and s = (dR - dB) / 2 the offsets from green: 0 is green, 45 yellow.
+    "neutral_axis_foliage_chroma": 0.03,
+    "neutral_axis_foliage_hue": (-25.0, 80.0),
     # Confidence sample-size half-point: the size term is n / (n + this).
     "neutral_axis_confidence_n0": 256,
     # Mid/shadow deviation-difference dead zone (a plausible crossover passes free)

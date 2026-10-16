@@ -99,7 +99,9 @@ class TransparencyBaseProcessor:
         # space than the GPU's. Pre-trim bounds, so a White/Black Point nudge cannot
         # perturb it.
         if self.cast_strength > 0.0:
-            context.metrics["neutral_axis_refs"] = measure_neutral_axis_from_log(prefiltered, pre_trim_bounds, None, 0.0)
+            context.metrics["neutral_axis_refs"] = measure_neutral_axis_from_log(
+                prefiltered, pre_trim_bounds, None, 0.0, exclude_foliage=False
+            )
 
         # Auto Density and Auto Grade meter against the same fixed pre-trim window.
         context.metrics["metered_anchor"] = measure_anchor_from_log(
