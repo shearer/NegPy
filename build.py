@@ -70,6 +70,10 @@ params = [
     # lookup actually looks.
     "--hidden-import=pieusb",
     "--collect-all=libusb_package",
+    # nkscan (Nikon Coolscan): a Rust extension imported inside a try block, so bundle it
+    # explicitly with its compiled module and package data.
+    "--hidden-import=nkscan",
+    "--collect-all=nkscan",
     # Plustek / pyopticfilm: ship PyUSB + bundled libusb on Windows only.
     # Linux/macOS use host libusb via PyUSB (same stack SANE needs).
     *(
