@@ -349,11 +349,10 @@ def package_windows():
 
     try:
         setup_name = f"{APP_NAME}-{VERSION}-Win64-Setup.exe"
-        # On Windows, using shell=True helps resolving commands in PATH
+        # Call makensis directly so a resolved absolute path works on Windows.
         subprocess.run(
             [cmd, f"/DVERSION={VERSION}", f"/DOUTFILE={setup_name}", "installer.nsi"],
             check=True,
-            shell=is_windows,
         )
         print(f"Windows Installer created: dist/{setup_name}")
     except Exception as e:
