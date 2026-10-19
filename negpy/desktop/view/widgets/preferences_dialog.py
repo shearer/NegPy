@@ -516,8 +516,8 @@ class PreferencesDialog(QDialog):
 
     def _on_language_changed(self, index: int) -> None:
         self.repo.save_global_setting("ui_language", self.language_combo.currentData())
-
         self._mark_restart()
+
     def _on_ui_theme_changed(self, index: int) -> None:
         self.repo.save_global_setting("ui_theme", str(self.theme_combo.itemData(index)))
         self._mark_restart()
