@@ -255,8 +255,6 @@ class PreferencesDialog(QDialog):
         grid.addWidget(self.theme_combo, row, 1)
         row += 1
         grid.addWidget(field_label(tr("Canvas background")), row, 0)
-
-        grid.addWidget(field_label(tr("Canvas background")), row, 0)
         pills = QHBoxLayout()
         pills.setSpacing(THEME.space_sm)
         self.canvas_group = QButtonGroup(self)
