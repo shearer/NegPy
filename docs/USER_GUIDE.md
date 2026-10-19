@@ -1161,6 +1161,7 @@ Application-wide settings: **⋯** menu → **Preferences…** or `Ctrl + ,`. Ch
 
 *   **Language** (default System Default): English, Simplified Chinese, Japanese or Korean; restart to apply. Other system languages use English. Panel guides use the selected language and fall back to English when a translation is missing.
 *   **UI scale** (80% to 120%): after a restart.
+*   **UI Theme**: **Black** (default), **Dark Gray** or **Middle Gray** for the app's own panels and chrome, after a restart.
 *   **Canvas background**: black, dark gray, mid gray (neutral for judging) or white (a print on a light table).
 *   **Immersive canvas**: the toolbar floats over the image.
 *   **Sticky zoom**: keeps the zoom when you switch frames.

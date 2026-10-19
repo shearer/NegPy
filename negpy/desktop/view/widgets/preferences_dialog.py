@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 from negpy.desktop.controller import AppController
 from negpy.desktop.view.styles.color_vision import PALETTES
 from negpy.desktop.view.styles.templates import default_button_height, field_label, hint_label, pin_dialog_default
-from negpy.desktop.view.styles.theme import THEME
+from negpy.desktop.view.styles.theme import THEME, UI_THEMES
 from negpy.desktop.view.widgets.collapsible import CollapsibleSection
 from negpy.desktop.view.widgets.dialog_geometry import remember_dialog_geometry
 from negpy.desktop.view.widgets.semantic_download_dialog import ClipDownloadDialog
@@ -244,6 +244,18 @@ class PreferencesDialog(QDialog):
         row += 1
 
         grid.addWidget(field_label(tr("Canvas background")), row, 0)
+        grid.addWidget(field_label("UI Theme"), row, 0)
+        self.theme_combo = QComboBox()
+        for key, label in UI_THEMES:
+            self.theme_combo.addItem(label, key)
+        stored_theme = str(self.repo.get_global_setting("ui_theme", "black") or "black")
+        self.theme_combo.setCurrentIndex(max(self.theme_combo.findData(stored_theme), 0))
+        self.theme_combo.currentIndexChanged.connect(self._on_ui_theme_changed)
+        self.theme_combo.setToolTip("Color of the app's panels and chrome")
+        grid.addWidget(self.theme_combo, row, 1)
+        row += 1
+
+        grid.addWidget(field_label("Canvas background"), row, 0)
         pills = QHBoxLayout()
         pills.setSpacing(THEME.space_sm)
         self.canvas_group = QButtonGroup(self)
@@ -504,6 +516,8 @@ class PreferencesDialog(QDialog):
 
     def _on_language_changed(self, index: int) -> None:
         self.repo.save_global_setting("ui_language", self.language_combo.currentData())
+    def _on_ui_theme_changed(self, index: int) -> None:
+        self.repo.save_global_setting("ui_theme", str(self.theme_combo.itemData(index)))
         self._mark_restart()
 
     def _on_sticky_settings_changed(self, checked: bool) -> None:
