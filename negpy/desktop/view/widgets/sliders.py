@@ -15,11 +15,12 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QPainter, QColor, QPen
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QRect, QRectF, QEvent, QLocale
 from negpy.desktop.view.styles.theme import THEME
+from negpy.kernel.system.i18n import tr
 from negpy.desktop.view.styles.templates import EditedDot, FieldLabel, slider_handle_qss, slider_label_qss, slider_value_qss, wrap_tooltip
 
 
 # text_secondary, not text_muted: #555 on the #161616 tooltip background is ~2.4:1.
-_RESET_HINT = f'<div style="color:{THEME.text_secondary};">Double-click to reset</div>'
+_RESET_HINT = f'<div style="color:{THEME.text_secondary};">{tr("Double-click to reset")}</div>'
 
 # Quiet period after the last slider step before a render is asked for.
 _EMIT_INTERVAL_MS = 33
@@ -340,7 +341,7 @@ class CompactSlider(BaseSlider):
         layout.setContentsMargins(2, 0, 2, 0)
         layout.setSpacing(THEME.space_md)
 
-        self.label = QLabel(label)
+        self.label = QLabel(tr(label))
         self.label.setStyleSheet(slider_label_qss(self._label_color))
         self.label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.setToolTip(label)
@@ -529,6 +530,39 @@ class PowerWarpSlider(CompactSlider):
         frac = abs(s) ** self._warp_gamma
         half = self._warp_half_hi if s >= 0 else self._warp_half_lo
         return self._warp_center + math.copysign(frac * half, s)
+
+
+class LogSlider(CompactSlider):
+    """
+    CompactSlider variant with logarithmic travel from `log_floor` to the maximum, and the
+    minimum as the one step below the floor (0 = off). Equal drags move the value by equal
+    ratios, so 0.15 is as easy to set as 2.5.
+    """
+
+    _LOG_STEPS = 1000
+
+    def __init__(self, label: str, min_val: float, max_val: float, default_val: float, *, log_floor: float, **kwargs):
+        self._log_floor = log_floor
+        self._log_span = math.log(max_val / log_floor)
+        super().__init__(label, min_val, max_val, default_val, **kwargs)
+
+    def _to_int(self, value: float) -> int:
+        if value < self._log_floor:
+            return 0
+        return 1 + round(math.log(value / self._log_floor) / self._log_span * (self._LOG_STEPS - 1))
+
+    def _from_int(self, i: int) -> float:
+        if i <= 0:
+            return self._min
+        return self._log_floor * math.exp((i - 1) / (self._LOG_STEPS - 1) * self._log_span)
+
+    def _on_spin_changed(self, value: float) -> None:
+        if 0.0 < value < self._log_floor:  # typed under the floor: the floor, since off is 0 alone
+            value = self._log_floor
+            self.spin.blockSignals(True)
+            self.spin.setValue(value)
+            self.spin.blockSignals(False)
+        super()._on_spin_changed(value)
 
 
 class HueSlider(CompactSlider):
@@ -837,5 +871,11 @@ def align_slider_columns(root: QWidget) -> None:
             spacer = field.value_spacer = QSpacerItem(0, 0)
             row.addSpacerItem(spacer)
         reserve = slider_row.spacing() + value_width + margins.right()
-        spacer.changeSize(reserve, 0, QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        # A trailing widget marked value_column sits in the value column instead of narrowing the field.
+        for k in range(row.count()):
+            item = row.itemAt(k)
+            if item.widget() is not None and item.widget().property("value_column"):
+                # The item's hint, not the widget's: it honors a fixed size.
+                reserve -= item.sizeHint().width() + row.spacing()
+        spacer.changeSize(max(reserve, 0), 0, QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         row.invalidate()
