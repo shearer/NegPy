@@ -7,6 +7,7 @@ from PyQt6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
+    QComboBox,
     QDialog,
     QFrame,
     QGridLayout,
