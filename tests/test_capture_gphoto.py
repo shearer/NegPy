@@ -424,9 +424,9 @@ def test_capture_rejects_a_shutter_that_never_settles(cam, fake, tmp_path, monke
     assert fake.captures == 0
 
 
-def test_capture_skips_an_unchanged_shutter(cam, fake, tmp_path):
-    cam.capture(str(tmp_path / "f.ARW"), shutter="1/5")  # already 1/5
-    assert fake.writes == []
+def test_capture_writes_the_shutter_even_when_the_body_reports_it(cam, fake, tmp_path):
+    cam.capture(str(tmp_path / "f.ARW"), shutter="1/5")  # the cache says 1/5; the dial may not
+    assert ("shutterspeed", "1/5") in fake.writes
 
 
 def test_capture_forces_the_preset_iso_and_aperture(cam, fake, tmp_path):
@@ -436,9 +436,9 @@ def test_capture_forces_the_preset_iso_and_aperture(cam, fake, tmp_path):
     assert ("f-number", "11") in fake.writes
 
 
-def test_capture_skips_iso_that_is_already_set(cam, fake, tmp_path):
-    cam.capture(str(tmp_path / "f.ARW"), iso="100")  # the body is already on ISO 100
-    assert fake.writes == []  # no needless ~1-2 s write before every scan
+def test_capture_writes_iso_that_reads_as_set(cam, fake, tmp_path):
+    cam.capture(str(tmp_path / "f.ARW"), iso="100")  # the cache says ISO 100; the dial may not
+    assert ("iso", "100") in fake.writes
 
 
 def test_capture_tolerates_an_iso_the_body_rejects(cam, fake, tmp_path):
@@ -471,12 +471,17 @@ def test_capture_rejects_processed_jpeg_instead_of_accepting_it_as_raw(tmp_path)
 
 def test_set_iso_writes_the_chosen_label(cam, fake):
     cam.set_iso(2)
-    assert fake.writes == [("iso", "200")]
+    assert _settings_writes(fake) == [("iso", "200")]
+
+
+def test_set_choice_refuses_an_index_whose_label_moved(cam, fake):
+    cam.set_iso(1, "200")  # the body lists "100" at index 1: the panel's list is from another body
+    assert ("iso", "200") not in _settings_writes(fake) and _settings_writes(fake) == []
 
 
 def test_set_choice_ignores_an_out_of_range_index(cam, fake):
     cam.set_iso(99)
-    assert fake.writes == []
+    assert _settings_writes(fake) == []
 
 
 def test_a_write_that_never_settles_is_reported_not_raised(fake, caplog):
@@ -517,7 +522,7 @@ def test_a_body_without_a_magnifier_disables_it_instead_of_raising():
     camera.set_focus_magnifier_at(100, 100)  # must not raise
     camera.set_focus_magnifier(True)
     camera.set_focus_magnifier(False)
-    assert fake.writes == []  # nothing was sent to the body
+    assert _settings_writes(fake) == []  # nothing was sent to the body
     camera.close()
 
 
@@ -718,7 +723,7 @@ def test_live_view_publishes_frames_and_settings(fake, tmp_path):
     finally:
         camera.close()
     assert jpeg.read_bytes().startswith(b"\xff\xd8")
-    assert set(json.loads(settings.read_text())) == {"iso", "shutter", "magnifier"}
+    assert set(json.loads(settings.read_text())) == {"iso", "shutter", "magnifier", "pid"}
     assert not camera.is_running()
 
 
@@ -850,6 +855,21 @@ def test_preview_survives_a_still_that_leaves_late_events(fake, tmp_path):
     camera.close()
 
 
+def test_an_idle_session_publishes_on_request_and_a_streaming_one_leaves_it_to_the_preview(fake, tmp_path):
+    settings = tmp_path / "lv.json"
+    camera = GphotoCamera(gp_module=fake, jpeg_path=str(tmp_path / "lv.jpg"), settings_path=str(settings))
+    camera.publish_settings()
+    assert not settings.exists()  # closed: nothing to read
+    camera.open()
+    camera.publish_settings()
+    assert set(json.loads(settings.read_text())) == {"iso", "shutter", "magnifier", "pid"}
+    settings.unlink()
+    camera.is_running = lambda: True  # the preview thread owns the publish while it streams
+    camera.publish_settings()
+    assert not settings.exists()
+    camera.close()
+
+
 def test_refusing_live_view_still_publishes_the_camera_settings(tmp_path):
     """The preview loop is what normally writes them, so a body that never streams would leave
     the scan window's ISO/shutter steppers empty and its preset exposure unresolvable."""
@@ -860,7 +880,7 @@ def test_refusing_live_view_still_publishes_the_camera_settings(tmp_path):
     with pytest.raises(LiveViewUnsupported):
         camera.start()
 
-    assert set(json.loads(settings.read_text())) == {"iso", "shutter", "magnifier"}
+    assert set(json.loads(settings.read_text())) == {"iso", "shutter", "magnifier", "pid"}
     camera.close()
 
 
@@ -911,7 +931,7 @@ def test_capture_target_left_alone_when_the_body_offers_no_memory_option(caplog)
     fake.props["capturetarget"] = _Widget(fake, "capturetarget", "card", ["card"])
     camera = GphotoCamera(gp_module=fake)
     camera.open()
-    assert fake.writes == []
+    assert _settings_writes(fake) == []
     assert "no in-memory capture target" in caplog.text
     camera.close()
 
@@ -940,7 +960,7 @@ def test_a_value_the_body_never_published_is_refused_not_written(cam, fake, capl
     with caplog.at_level(logging.WARNING):
         assert cam._set_verified("shutterspeed", "0.4") is False
 
-    assert fake.writes == []  # nothing was sent to the body
+    assert _settings_writes(fake) == []  # nothing was sent to the body
     message = caplog.text
     assert "does not offer" in message and "1/5" in message  # the body's real choices are named
 
@@ -988,6 +1008,11 @@ def test_open_never_retries_a_claim_conflict(fake, monkeypatch):
 
 
 # ---- a magnifier that stops the stream ---------------------------------------
+
+
+def _settings_writes(fake):
+    """The writes after open's own capturetarget write."""
+    return [w for w in fake.writes if w[0] != "capturetarget"]
 
 
 def _wait_for(condition, what):

@@ -1253,7 +1253,7 @@ def _edge_border_depth(box: np.ndarray, side: str, limit: int, deep_limit: int =
     margin = int(round((1.0 - _EDGE_CORE) * 0.5 * n))
     if n - 2 * margin >= 8:
         lines = lines[:, margin : n - margin]
-    if lines.shape[0] < limit + 8 or lines.shape[1] < 8:
+    if limit <= 0 or lines.shape[0] < limit + 8 or lines.shape[1] < 8:
         return 0
 
     near = _pool_border_depth(_walk_border_depth(lines, limit, _EDGE_BRIDGE, False), limit)
@@ -1520,6 +1520,30 @@ def _refine_film_roi_by_tiers(lum: np.ndarray, film_roi: ROI) -> Optional[Tuple[
     col_occ_full[x1:x2] = col_occ
 
     return (y1 + vt, y1 + vb, x1 + hl, x1 + hr), row_occ_full, col_occ_full
+
+
+def film_and_picture(det: np.ndarray) -> Tuple[Optional[ROI], ROI]:
+    """The film box (None when the scan shows no film edge) and the picture gate inside it,
+    at detection resolution. With no film box the gate is refined over the whole frame; a
+    degenerate gate (a blank or dark frame) falls back to the whole frame."""
+    h, w = det.shape[:2]
+    film = detect_film_bounds_with_confidence(det)
+    gate, _, _ = _refine_roi_to_image(det, film.roi if film.roi is not None else (0, h, 0, w))
+    if gate[1] <= gate[0] or gate[3] <= gate[2]:
+        gate = (0, h, 0, w)
+    return film.roi, gate
+
+
+def rebate_mask(shape: Tuple[int, int], film_roi: Optional[ROI], gate: ROI) -> np.ndarray:
+    """The clear rebate: inside the film box, outside the picture gate. All False without a
+    film box, because the ring would then be whatever surrounds the picture, bare light included."""
+    rebate = np.zeros(shape, bool)
+    if film_roi is not None:
+        fy1, fy2, fx1, fx2 = film_roi
+        gy1, gy2, gx1, gx2 = gate
+        rebate[fy1:fy2, fx1:fx2] = True
+        rebate[gy1:gy2, gx1:gx2] = False
+    return rebate
 
 
 def _refine_roi_to_image(img: ImageBuffer, film_roi: ROI) -> Tuple[ROI, Optional[np.ndarray], Optional[np.ndarray]]:

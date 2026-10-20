@@ -1,11 +1,14 @@
+from negpy.kernel.system.i18n import mark, tr
+from collections.abc import Iterable
 import dataclasses
 import html
 import math
 
 import qtawesome as qta
-from PyQt6.QtCore import QEvent, QPoint, QRect, QSize, Qt
+from PyQt6.QtCore import QEvent, QObject, QPoint, QRect, QSize, Qt
 from PyQt6.QtGui import QColor, QIcon, QIconEngine, QImage, QLinearGradient, QPainter, QPixmap
 from PyQt6.QtWidgets import (
+    QComboBox,
     QDialogButtonBox,
     QHBoxLayout,
     QLabel,
@@ -21,6 +24,41 @@ from PyQt6.QtWidgets import (
 
 from negpy.desktop.view.styles.fonts import ui_font_family
 from negpy.desktop.view.styles.theme import THEME
+
+_CHOICE_LABELS = {
+    "Other": mark("Other"),
+    "ColorNegative": mark("Color Negative"),
+    "ColorSlide": mark("Color Slide"),
+    "B&W Negative": mark("B&W Negative"),
+    "B&W Slide": mark("B&W Slide"),
+    "Normal": mark("Normal"),
+    "Push +1": mark("Push +1"),
+    "Push +2": mark("Push +2"),
+    "Push +3": mark("Push +3"),
+    "Pull -1": mark("Pull -1"),
+    "Pull -2": mark("Pull -2"),
+    "Pull -3": mark("Pull -3"),
+    "Original": mark("Original"),
+    "Same as Source": mark("Same as Source"),
+    "Free": mark("Free"),
+}
+
+
+def choice_label(value: str) -> str:
+    """Translate static enum labels; exclude file names and user gear names."""
+    return tr(_CHOICE_LABELS.get(value, value))
+
+
+def add_choice_items(combo: QComboBox, values: Iterable[str]) -> None:
+    """Show translated labels and store the original enum values in itemData."""
+    for value in values:
+        combo.addItem(choice_label(value), value)
+
+
+def select_choice(combo: QComboBox, value: str) -> None:
+    """Normalize StrEnum values to strings for Qt's QVariant lookup."""
+    combo.setCurrentIndex(max(0, combo.findData(str(value))))
+
 
 # One width for every icon-only button, so mixed rows keep a common right edge.
 ICON_BUTTON_WIDTH = 36
@@ -67,7 +105,7 @@ def default_button_height() -> int:
     mixed button rows stair-step)."""
     global _default_btn_height
     if _default_btn_height is None:
-        ref = QPushButton(" Ref")
+        ref = QPushButton(tr(" Ref"))
         ref.setIcon(qta.icon("fa5s.circle"))
         _default_btn_height = ref.sizeHint().height()
     return _default_btn_height
@@ -153,6 +191,35 @@ def tool_toggle(icon_name: str, label: str, tooltip: str, align_left: bool = Fal
     return btn
 
 
+class _PinRight(QObject):
+    """Holds an overlay child centered on its parent's right edge."""
+
+    def __init__(self, child: QWidget, margin: int) -> None:
+        super().__init__(child)
+        self._margin = margin
+        child.parentWidget().installEventFilter(self)
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if event.type() == QEvent.Type.Resize:
+            child = self.parent()
+            child.move(obj.width() - child.width() - self._margin, (obj.height() - child.height()) // 2)
+        return False
+
+
+def clearable_tool_toggle(icon_name: str, label: str, tooltip: str, clear_tooltip: str) -> QPushButton:
+    """tool_toggle for a tool that leaves a saved result. btn.clear_btn, an inline × at its right
+    edge, clears that result; show it while the result exists, in place of the edited dot."""
+    btn = tool_toggle(icon_name, label, tooltip)
+    inset = THEME.space_sm
+    # Both sides, so the label stays centered and never runs under the ×.
+    btn.setStyleSheet(f"QPushButton {{padding-left: {HEADER_BUTTON_SIZE + inset}px; padding-right: {HEADER_BUTTON_SIZE + inset}px;}}")
+    btn.clear_btn = header_button(qta.icon("fa5s.times", color=THEME.text_primary), clear_tooltip)
+    btn.clear_btn.setParent(btn)
+    btn.clear_btn.hide()
+    _PinRight(btn.clear_btn, inset)
+    return btn
+
+
 def labeled_toggle(icon_name: str, label: str, checked: bool, tooltip: str) -> QPushButton:
     """Labeled checkable button (icon + text), the Pick WB / Linear RAW look."""
     btn = _LabeledButton(label)
@@ -215,6 +282,8 @@ RGB_SWEEP = Sweep((THEME.channel_red_text, THEME.channel_green_text, THEME.chann
 RING_AROUND_SWEEP = Sweep((THEME.filter_magenta, THEME.filter_yellow))
 # Light to dark on the diagonal: a test strip's density runs across it and its grade down it.
 TEST_STRIP_SWEEP = Sweep((THEME.canvas_bg_white, THEME.mode_bw), angle=45)
+# Paper white to a warm print, across the bands: a paper test strip prints one stock per band.
+PAPER_STRIP_SWEEP = Sweep((THEME.canvas_bg_white, THEME.mode_c41))
 # The clipping overlay's own two colors: clipped highlights, then clipped shadows.
 CLIPPING_SWEEP = Sweep((THEME.clip_warning, THEME.clip_shadow))
 
@@ -296,7 +365,7 @@ def wrap_tooltip(text: str, footer: str = "") -> str:
     a boilerplate line don't have to re-implement the escape/passthrough rule."""
     if not text.startswith("<qt>"):
         body = text if ("<" in text and ">" in text) else html.escape(text).replace("\n", "<br>")
-        text = f"<qt>{body}</qt>"
+        text = tr("<qt>{body}</qt>", body=body)
     if footer:
         text = text.removesuffix("</qt>") + footer + "</qt>"
     return text
@@ -486,7 +555,7 @@ def header_row(header: QLabel, *buttons: QWidget) -> QHBoxLayout:
 
 def section_subheader(text: str) -> QLabel:
     """Small all-caps label for section grouping in sidebars; wraps in a panel too narrow for it."""
-    lbl = QLabel(text.upper())
+    lbl = QLabel(tr(text).upper())
     lbl.setWordWrap(True)
     lbl.setStyleSheet(
         f"font-size: {THEME.font_size_small}px; "
@@ -508,7 +577,7 @@ class FieldLabel(QLabel):
 
 def field_label(text: str, width: int | None = None) -> QLabel:
     """Muted semibold label for a combo/entry field."""
-    lbl = FieldLabel(text)
+    lbl = FieldLabel(tr(text))
     lbl.setStyleSheet(field_label_qss())
     if width is not None:
         lbl.setFixedWidth(width)

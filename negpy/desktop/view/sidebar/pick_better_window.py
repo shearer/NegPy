@@ -13,32 +13,27 @@ and each label letterboxes its frame, so a preview keeps its aspect ratio — it
 and never width-capped.
 """
 
-from typing import Optional
-
-from PyQt6.QtCore import Qt, QPoint, QRect, QTimer, pyqtSignal
+from negpy.kernel.system.i18n import tr
+from PyQt6.QtCore import Qt, QPoint, QTimer, pyqtSignal
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
+    QApplication,
     QDialog,
     QHBoxLayout,
+    QLabel,
     QVBoxLayout,
     QWidget,
 )
 
-from negpy.desktop.view.sidebar.roi_image import RoiImageLabel
+from negpy.desktop.view.sidebar.roi_image import RoiImageLabel, _RING_MARGIN
 from negpy.desktop.view.styles.templates import (
     caption_label,
     labeled_action,
     pin_dialog_default,
 )
-from negpy.desktop.view.widgets.dialog_geometry import remember_dialog_geometry
 from negpy.desktop.view.widgets.floating_panel import float_over_app
 from negpy.desktop.view.widgets.sliders import CompactSlider
 
-#: The window sits one notch smaller than the main window: 0.8 of its size, floored so a
-#: small main window does not shrink the three previews below a usable size.
-_SIZE_FACTOR = 0.8
-#: Floor for the 0.8x-main size: three full previews plus room for the name and the control row.
-_MIN_W, _MIN_H = 1200, 760
 #: Gap between a caption's bottom edge and its photo's top edge.
 _CAPTION_GAP = 4
 #: The move summary's clear delay and its margin from the panel's top edge.
@@ -56,12 +51,16 @@ class PickBetterWindow(QDialog):
     diffChanged = pyqtSignal(float)  # the Difference slider's A/B spread multiplier
     customRoutingClicked = pyqtSignal()  # open the Custom Routing window
 
-    def __init__(self, parent=None, *, repo=None) -> None:
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Pick Better")
+        self.setWindowTitle(tr("Pick Better"))
         self.setModal(False)
         float_over_app(self)  # must precede the first show(): the panel flags hide a visible window
-        self._last_main_geo: Optional[QRect] = None
+        self._user_resized = False  # a manual drag is remembered for the app session, then the aspect follow stops
+        self._sizing = False  # a programmatic resize must not read as a user drag
+
+        self._last_pw = 0  # the last frame's size; a show before set_images re-sizes to it
+        self._last_ph = 0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -85,9 +84,9 @@ class PickBetterWindow(QDialog):
 
         # The A/Skip/B captions are children of the panel, repositioned to each photo's top edge on
         # resize and on a new frame, so they hug the photo (a layout row would sit at the panel's top).
-        self._cap_left = caption_label("A")
-        self._cap_center = caption_label("Skip")
-        self._cap_right = caption_label("B")
+        self._cap_left = caption_label(tr("A"))
+        self._cap_center = caption_label(tr("Skip"))
+        self._cap_right = caption_label(tr("B"))
         for cap in (self._cap_left, self._cap_center, self._cap_right):
             cap.setParent(self._image_panel)
             cap.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -109,13 +108,19 @@ class PickBetterWindow(QDialog):
         self._move_timer.setSingleShot(True)
         self._move_timer.timeout.connect(lambda: self._move_label.setText(""))
 
+        # The photos inset from the panel's top by the reserved band — the move summary, the in-flight
+        # name and the A/Skip/B captions — so a caption that hugs a photo's top edge sits clear of
+        # both the move summary and the photo, even when a short window's letterbox lifts the photos
+        # up toward the top.
+        image_row.setContentsMargins(0, self._reserved_top(), 0, 0)
+
         # A control row under the photos: the Difference slider widens or narrows the A/B spread
         # live, and the Custom Routing button opens a window to reorder the round order.
         control_row = QHBoxLayout()
-        self._diff_slider = CompactSlider("Difference", 0.25, 4.0, 1.0, step=0.05, unit="×")
+        self._diff_slider = CompactSlider(tr("Difference"), 0.25, 4.0, 1.0, step=0.05, unit="×")
         self._diff_slider.valueChanged.connect(self.diffChanged)
         self._custom_routing_btn = labeled_action(
-            "fa5s.route", "Custom Routing", "Open the window that reorders which parameter each round proposes"
+            "fa5s.route", tr("Custom Routing"), tr("Open the window that reorders which parameter each round proposes")
         )
         self._custom_routing_btn.clicked.connect(self.customRoutingClicked)
         control_row.addWidget(self._diff_slider, 1)
@@ -125,8 +130,8 @@ class PickBetterWindow(QDialog):
         # Bottom-right: Undo (re-show the previous pair) and OK (close = end the mode).
         button_row = QHBoxLayout()
         button_row.addStretch(1)
-        self.undo_btn = labeled_action("fa5s.undo", " Undo", "Revert the last pick and re-show that pair")
-        self.ok_btn = labeled_action("fa5s.check", " OK", "Finish Pick Better and close the window", primary=True)
+        self.undo_btn = labeled_action("fa5s.undo", tr(" Undo"), tr("Revert the last pick and re-show that pair"))
+        self.ok_btn = labeled_action("fa5s.check", tr(" OK"), tr("Finish Pick Better and close the window"), primary=True)
         button_row.addWidget(self.undo_btn)
         button_row.addWidget(self.ok_btn)
         layout.addLayout(button_row)
@@ -140,14 +145,22 @@ class PickBetterWindow(QDialog):
         # Pin OK as the dialog's one Enter target; Undo opts out.
         pin_dialog_default(self.ok_btn, self.undo_btn)
 
-        remember_dialog_geometry(self, repo, "pick_better")
         self._schedule_reposition()
 
     def set_images(self, current: QPixmap, left: QPixmap, right: QPixmap) -> None:
-        """Push the three rendered frames onto their labels (each letterboxes to fit)."""
+        """Push the three rendered frames onto their labels (each letterboxes to fit). The window
+        follows each new image's aspect ratio unless the user has resized it, which is then kept for
+        the app session."""
         self.current_label.set_frame(current)
         self.left_label.set_frame(left)
         self.right_label.set_frame(right)
+        if not current.isNull():
+            pw, ph = current.width(), current.height()
+            # Follow each new image's aspect unless the user has resized; a manual resize is kept for the app session.
+            if not self._user_resized and (pw, ph) != (self._last_pw, self._last_ph):
+                self._size_to_image(pw, ph)
+            self._last_pw = pw
+            self._last_ph = ph
         self._schedule_reposition()
 
     def set_param_name(self, text: str) -> None:
@@ -174,7 +187,14 @@ class PickBetterWindow(QDialog):
 
     def _reposition_captions(self) -> None:
         """Sit each caption just above its photo's top edge, tracking a resize or a new frame; the
-        photo's top is a paint-time letterbox position, not a fixed layout slot."""
+        photo's top is a paint-time letterbox position, not a fixed layout slot.
+
+        The photos inset from the panel's top by the reserved band (the move summary, the in-flight
+        name and the A/Skip/B captions), so a caption that hugs a photo's top edge sits clear of
+        both the move summary and the photo, even when a short window's letterbox lifts the photos
+        toward the top."""
+        # Each caption's natural position sits just above its photo's top edge.
+        cap_pos: dict[QLabel, tuple[int, int]] = {}
         for label, cap in (
             (self.left_label, self._cap_left),
             (self.current_label, self._cap_center),
@@ -185,23 +205,39 @@ class PickBetterWindow(QDialog):
                 cap.hide()
                 continue
             cap.adjustSize()
-            cap.show()
             origin = label.mapTo(self._image_panel, QPoint(0, 0))
             x = origin.x() + rect.x() + (rect.width() - cap.width()) // 2
             y = origin.y() + rect.y() - cap.height() - _CAPTION_GAP
-            cap.move(x, y)
-            # The parameter name floats above the centre "Skip" caption, centred on the same photo.
-        if self._cap_center.isVisible():
+            cap_pos[cap] = (x, y)
+        # The in-flight parameter name sits just above the centre Skip caption.
+        name_visible = False
+        name_x = name_y = 0
+        if self._cap_center in cap_pos:
+            cx, cy = cap_pos[self._cap_center]
             self._name_label.adjustSize()
+            name_x = cx + (self._cap_center.width() - self._name_label.width()) // 2
+            name_y = cy - self._name_label.height() - _CAPTION_GAP
+            name_visible = True
+        for cap, (x, y) in cap_pos.items():
+            cap.show()
+            cap.move(x, y)
+        if name_visible:
             self._name_label.show()
-            x = self._cap_center.x() + (self._cap_center.width() - self._name_label.width()) // 2
-            y = self._cap_center.y() - self._name_label.height() - _CAPTION_GAP
-            self._name_label.move(x, y)
+            self._name_label.move(name_x, name_y)
             self._name_label.raise_()
         else:
             self._name_label.hide()
-        # The move summary floats at the panel's top; re-centre it on every resize and new frame.
         self._reposition_move_label()
+
+    def _line_height(self) -> int:
+        """One caption's line height, the reserved height of the move summary's band at the panel top."""
+        return self._cap_center.sizeHint().height()
+
+    def _reserved_top(self) -> int:
+        """The band at the panel's top the move summary, the in-flight name and the A/Skip/B captions
+        occupy; the photos inset by this much so a caption that hugs a photo's top edge sits clear
+        of both the move summary and the photo."""
+        return _MOVE_TOP_MARGIN + 3 * _CAPTION_GAP + 3 * self._line_height()
 
     def _schedule_reposition(self) -> None:
         # A label gets its final size only after the layout runs, which is after this event
@@ -210,25 +246,69 @@ class PickBetterWindow(QDialog):
 
     def resizeEvent(self, ev) -> None:
         super().resizeEvent(ev)
+        # A spontaneous resize is a user drag, remembered for the app session; a programmatic resize from
+        # _size_to_image is not, so the aspect follow keeps working until the user drags.
+        if ev.spontaneous() and not self._sizing:
+            self._user_resized = True
         self._schedule_reposition()
 
     def showEvent(self, ev) -> None:
         super().showEvent(ev)
+        # Follow the image's aspect on each open unless the user has resized; a manual resize is kept
+        # for the app session, and an app exit drops it (no disk persistence).
+        if not self._user_resized and self._last_pw > 0:
+            self._size_to_image(self._last_pw, self._last_ph)
         self._schedule_reposition()
 
-    def size_and_center_to(self, main: QWidget) -> None:
-        """One notch smaller than, and centred on, the main window — 0.8 of its current size,
-        floored so a small main window does not shrink the previews below a usable size. A
-        re-centre runs only when the main window moved or resized, so a pick (which leaves the
-        main window untouched) never resets a position the user has set."""
-        geo = main.geometry()
-        if geo == self._last_main_geo:
-            return
-        self._last_main_geo = geo
-        w = max(int(geo.width() * _SIZE_FACTOR), _MIN_W)
-        h = max(int(geo.height() * _SIZE_FACTOR), _MIN_H)
+    def hideEvent(self, ev) -> None:
+        super().hideEvent(ev)
+
+    def _size_to_image(self, pw: int, ph: int) -> None:
+        """Size the window so the three photos fill their frames at the largest scale that
+        fits the monitor, with no black gap between them. A smaller monitor down-scales the
+        photos rather than leaving black beside them. The photo row is measured at zero height
+        so the window minimum size stays small and the final resize is not clamped by it."""
+        ring = 2 * _RING_MARGIN
+        gap = 10  # the image row's spacing between the three frames
+        margin = 10  # the panel's left and right content margin
+        labels = (self.left_label, self.current_label, self.right_label)
+        for label in labels:
+            label.setMinimumSize(0, 0)
+        self.layout().activate()
+        # The band the photos do not occupy: the reserved top, the control row, the button
+        # row, and the panel's margins and inter-row spacing.
+        fixed_h = self.layout().minimumSize().height()
+        # Largest per-photo width that keeps the window inside the monitor in both axes; pw
+        # (full resolution) when the full-res size already fits.
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            screens = QApplication.screens()
+            screen = screens[0] if screens else None
+        avail = screen.availableGeometry() if screen is not None else None
+        s = float(pw)
+        if avail is not None:
+            s = min(s, (avail.width() - 2 * margin - 2 * gap - 3 * ring) / 3.0)
+            s = min(s, (avail.height() - fixed_h - ring) * pw / ph)
+        s = max(s, 1.0)
+        w = int(3 * (s + ring) + 2 * gap + 2 * margin)
+        h = int(s * ph / pw + ring + fixed_h)
+        if avail is not None:
+            w = min(w, avail.width())
+            h = min(h, avail.height())
+        parent = self.parent()
+        if parent is not None:
+            geo = parent.geometry()
+            x = geo.x() + (geo.width() - w) // 2
+            y = geo.y() + (geo.height() - h) // 2
+            if avail is not None:
+                x = max(avail.x(), min(x, avail.x() + avail.width() - w))
+                y = max(avail.y(), min(y, avail.y() + avail.height() - h))
+            self.move(x, y)
+        for label in labels:
+            label.setMinimumSize(0, 160)
+        self._sizing = True
         self.resize(w, h)
-        self.move(geo.x() + (geo.width() - w) // 2, geo.y() + (geo.height() - h) // 2)
+        self._sizing = False
 
     def done(self, result: int) -> None:
         # Esc reaches here without a closeEvent, so the session cleanup hangs off done().

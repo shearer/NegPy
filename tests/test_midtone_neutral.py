@@ -112,7 +112,6 @@ def _solve(neutral_axis):
         auto_normalize_contrast=True,
         strength=1.0,
         lum_range=1.5,
-        shadow_refs_norm=None,
         textural_range=0.75,
         neutral_axis_norm=neutral_axis,
     )

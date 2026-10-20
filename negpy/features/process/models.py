@@ -116,9 +116,6 @@ class ProcessConfig:
 
     process_mode: ProcessMode = ProcessMode.C41
     linear_raw: bool = False
-    # Correct narrowband RGB camera scans via the bundled RGBScan input profile
-    # (applied at preview soft-proof / export; an explicit Input ICC overrides it).
-    narrowband_scan: bool = False
     # The source is a finished positive (a scanned print, an export from other software, a
     # scanner's own positive) rather than a raw capture. Slide only, held in __post_init__.
     # It decodes on its embedded profile, sRGB when untagged, instead of as literal linear
@@ -302,11 +299,15 @@ def with_film_fields(config: "WorkspaceConfig", fields: dict) -> "WorkspaceConfi
     return config
 
 
-def scan_setup_values(capture: str, light: str) -> tuple[bool, bool]:
-    """(linear_raw, narrowband_scan) for a scanning rig — capture is "camera"/"scanner",
-    light is "white"/"narrowband". A camera under white light is the only combination that
-    wants the as-shot-WB decode."""
-    return not (capture == "camera" and light == "white"), light == "narrowband"
+# The print stocks the scanning-setup wizard picks between; a frame on any other stock keeps it.
+SCAN_SETUP_PAPERS = ("neutral", "pakon")
+
+
+def scan_setup_values(capture: str, light: str) -> tuple[bool, str]:
+    """(linear_raw, paper_profile) for a scanning rig — capture is "camera"/"scanner", light is
+    "white"/"narrowband". A camera under white light is the only combination that wants the
+    as-shot-WB decode. Narrowband light prints on the Pakon minilab stock, white light on Digital."""
+    return not (capture == "camera" and light == "white"), "pakon" if light == "narrowband" else "neutral"
 
 
 def per_channel_point_offsets(process: ProcessConfig) -> tuple[tuple[float, float, float], tuple[float, float, float]]:

@@ -105,6 +105,7 @@ params = [
     "--collect-all=onnxruntime",
     # Data files
     "--add-data=negpy/features/exposure/shaders:negpy/features/exposure/shaders",
+    "--add-data=negpy/features/exposure/print_luts:negpy/features/exposure/print_luts",
     "--add-data=negpy/features/geometry/shaders:negpy/features/geometry/shaders",
     "--add-data=negpy/features/toning/shaders:negpy/features/toning/shaders",
     "--add-data=negpy/features/lab/shaders:negpy/features/lab/shaders",
@@ -114,6 +115,7 @@ params = [
     "--add-data=negpy/features/finish/shaders:negpy/features/finish/shaders",
     "--add-data=negpy/features/transparency/shaders:negpy/features/transparency/shaders",
     "--add-data=negpy/desktop/view/styles:negpy/desktop/view/styles",
+    "--add-data=negpy/translations:negpy/translations",
     "--add-data=icc:icc",
     "--add-data=media:media",
     "--add-data=crosstalk:crosstalk",

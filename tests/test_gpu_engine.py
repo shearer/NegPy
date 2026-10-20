@@ -41,9 +41,7 @@ class TestGPUEngine(unittest.TestCase):
         img = (rng.random((100, 100, 3), dtype=np.float32) * 0.5 + 0.2).astype(np.float32)
         _, metrics = self.engine.process(img, WorkspaceConfig())
 
-        self.assertIn("shadow_log_refs", metrics)
         self.assertIn("neutral_axis_refs", metrics)
-        self.assertIsNotNone(metrics["shadow_log_refs"])
 
     def test_gpu_process_to_texture(self):
         """Verify process_to_texture returns a GPUTexture."""

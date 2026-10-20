@@ -105,6 +105,30 @@ def test_auto_density_grade_stay_on_a_raw_slide_and_a_positive(qapp):
     assert not sidebar.auto_btn.isHidden()
 
 
+def test_hold_black_rides_the_auto_menu_without_lighting_it(qapp):
+    controller = MagicMock()
+    controller.state = AppState()
+    cfg = controller.state.config
+    controller.state.config = replace(
+        cfg, exposure=replace(cfg.exposure, auto_exposure=False, auto_normalize_contrast=False, hold_black=True)
+    )
+    sidebar = ToneSidebar(controller)
+    sidebar.sync_ui()
+    assert sidebar.hold_black_action in sidebar.auto_btn.choice_menu.actions()
+    assert sidebar.hold_black_action.isChecked()
+    assert not sidebar.auto_btn.isChecked()
+
+    sidebar.update_config_section = MagicMock()
+    sidebar.hold_black_action.trigger()
+    assert sidebar.update_config_section.call_args.kwargs["hold_black"] is False
+
+    controller.state.config = replace(
+        controller.state.config, process=replace(controller.state.config.process, process_mode=ProcessMode.E6)
+    )
+    sidebar.sync_ui()
+    assert not sidebar.hold_black_action.isVisible()
+
+
 def _metered_sidebar():
     from negpy.features.exposure.normalization import LogNegativeBounds
 

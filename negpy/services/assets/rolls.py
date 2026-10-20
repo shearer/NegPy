@@ -21,6 +21,7 @@ from dataclasses import replace
 from fnmatch import fnmatchcase
 from typing import TYPE_CHECKING, Any, Callable, Collection, Dict, List, Optional, Sequence
 
+from negpy.features.exposure.normalization import BOUNDS_VERSION
 from negpy.features.metadata.models import GEAR_FIELDS, PROCESS_FIELDS, SCANNING_FIELDS
 from negpy.features.geometry.models import with_auto_crop_field
 from negpy.features.process.models import neutral_axis_tuple, with_film_fields
@@ -572,7 +573,6 @@ ROLL_DEFAULT_FIELDS: Dict[str, tuple] = {
         "process",
         (
             "linear_raw",
-            "narrowband_scan",
             "sensor_profile",
             "sensor_matrix",
             "sensor_unmix",
@@ -858,6 +858,7 @@ def set_roll_normalization(
     cast: tuple = (0.0, 0.0, 0.0),
     outliers: tuple = (),
     axis: Optional[tuple] = None,
+    bounds_version: int = BOUNDS_VERSION,
 ) -> None:
     """Records a Roll Analysis result as the roll's own baseline, overwriting
     whatever was there. No-op for an unknown roll id."""
@@ -865,8 +866,55 @@ def set_roll_normalization(
     entry = store.get(roll_id)
     if entry is None:
         return
-    entry["normalization"] = {"floors": list(floors), "ceils": list(ceils), "cast": list(cast), "outliers": list(outliers), "axis": axis}
+    entry["normalization"] = {
+        "floors": list(floors),
+        "ceils": list(ceils),
+        "cast": list(cast),
+        "outliers": list(outliers),
+        "axis": axis,
+        "bounds_version": bounds_version,
+    }
     _write(repo, store)
+
+
+def baseline_stale(saved: Optional[dict]) -> bool:
+    """Whether a saved roll or scene baseline was measured under an older BOUNDS_VERSION."""
+    return bool(saved) and int(saved.get("bounds_version", 0)) < BOUNDS_VERSION
+
+
+def frame_baseline_stale(repo: Any, process: Any) -> bool:
+    """Whether the roll or scene baseline a frame rides is stale. False for one taken
+    from a frame or saved before sources were recorded: neither can tell."""
+    kind, _, ref = process.baseline_source.partition(":")
+    if kind == "roll":
+        entry = roll_for_id(repo, ref)
+        return baseline_stale(entry.get("normalization") if entry else None)
+    if kind == "scene":
+        for entry in _view(repo).values():
+            scene = entry.get("scenes", {}).get(ref)
+            if scene:
+                return baseline_stale(scene.get("normalization"))
+    return False
+
+
+def roll_film_base(repo: Any, roll_id: Optional[str]) -> Optional[tuple]:
+    """The clear film base the user set on the roll with the Film Base tool, as per-channel
+    raw log10 transmittance (every render unmixes it like the rebate reader's), or None."""
+    entry = roll_for_id(repo, roll_id) if roll_id else None
+    saved = entry.get("film_base") if entry else None
+    return tuple(float(v) for v in saved) if saved else None
+
+
+def set_roll_film_base(repo: Any, roll_id: str, base_log: Optional[tuple]) -> bool:
+    """Records the roll's clear film base in raw log space; None clears it. False for an
+    unknown roll id."""
+    store = _read(repo)
+    entry = store.get(roll_id)
+    if entry is None:
+        return False
+    entry["film_base"] = None if base_log is None else [float(v) for v in base_log]
+    _write(repo, store)
+    return True
 
 
 def roll_scenes(repo: Any, roll_id: Optional[str]) -> List[tuple]:
@@ -962,7 +1010,13 @@ def set_scene_normalization(
 ) -> None:
     def edit(scenes: Dict[str, dict]) -> None:
         if scene_id in scenes:
-            saved = {"floors": list(floors), "ceils": list(ceils), "outliers": list(outliers), "axis": axis}
+            saved = {
+                "floors": list(floors),
+                "ceils": list(ceils),
+                "outliers": list(outliers),
+                "axis": axis,
+                "bounds_version": BOUNDS_VERSION,
+            }
             scenes[scene_id] = {**scenes[scene_id], "normalization": saved}
 
     _edit_scenes(repo, roll_id, edit)

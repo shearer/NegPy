@@ -1,3 +1,4 @@
+from negpy.kernel.system.i18n import tr
 from collections.abc import Callable
 from typing import Optional
 
@@ -24,6 +25,12 @@ from negpy.desktop.view.sidecar_action import load_edit_from_sidecar
 from negpy.desktop.view.file_actions import move_selected_to_trash, show_current_in_folder
 from negpy.desktop.view.slider_targets import slider_widget_map
 from negpy.desktop.view.widgets.collapsible import hidden_by_gating
+
+
+def _toggle_if_live(button) -> None:
+    """Toggle a panel button only while it can be used: a grayed-out or gated one keeps its setting."""
+    if button.isEnabled() and not hidden_by_gating(button):
+        button.toggle()
 
 
 def _context_undo(controller) -> None:
@@ -56,7 +63,7 @@ def _reset_roll(window, controller) -> None:
 
 
 def close_roll_label(state) -> str:
-    return "Close Roll…" if state.active_roll_id else "Unload All…"
+    return "Close Roll…" if state.active_roll_id else tr("Unload All…")
 
 
 def _close_roll(window, controller) -> None:
@@ -67,7 +74,7 @@ def _close_roll(window, controller) -> None:
     roll_id = session.state.active_roll_id
     name = None
     if roll_id:
-        name = (rolls.roll_for_id(session.repo, roll_id) or {}).get("name") or "this roll"
+        name = (rolls.roll_for_id(session.repo, roll_id) or {}).get("name") or tr("this roll")
     if confirm_close_roll(window, name):
         session.clear_files()
 
@@ -79,7 +86,7 @@ def remove_from_roll(window, controller) -> None:
         return
     indices = list(state.selected_indices) or [state.selected_file_idx]
     count = len(controller.roll_removal(indices))
-    name = (rolls.roll_for_id(controller.session.repo, state.active_roll_id) or {}).get("name") or "this roll"
+    name = (rolls.roll_for_id(controller.session.repo, state.active_roll_id) or {}).get("name") or tr("this roll")
     if count and confirm_remove_from_roll(window, count, name):
         controller.request_remove_from_roll(indices)
 
@@ -90,6 +97,12 @@ def _reset_selected(window, controller) -> None:
         controller.request_render()
 
 
+def _step_file(controller, step: int) -> None:
+    """Previous/next file, or the neighbor paper while the paper strip is up."""
+    if not controller.step_paper_strip(step):
+        (controller.session.next_file if step > 0 else controller.session.prev_file)()
+
+
 def _context_cancel(controller, window) -> None:
     """Esc ladder: whatever has taken the canvas over goes first — a test strip, any peek,
     the before/after split — then the grain focuser loupe, then an armed zone, then
@@ -97,6 +110,9 @@ def _context_cancel(controller, window) -> None:
     itself, or the Zone Overlay when no tool is armed."""
     if window.light_table_active():
         window.set_light_table(False)
+        return
+    if controller.state.test_strip and controller.state.test_strip_expanded is not None:
+        controller.show_paper_strip(None)
         return
     if controller.state.test_strip or controller.state.test_strip_pending:
         controller.toggle_test_strip(force=False)
@@ -145,7 +161,7 @@ def _toggle_tool_button(window, tab_key: str, button) -> None:
     if button.isChecked() or (button.isEnabled() and not hidden_by_gating(button)):
         button.toggle()
     else:
-        window.controller.set_status(f"{button.text().strip()} not available", 1500, kind="warning")
+        window.controller.set_status(tr("{value} not available", value=button.text().strip()), 1500, kind="warning")
 
 
 def _slider_name(slider: object, group: SliderShortcutGroup) -> str:
@@ -390,7 +406,7 @@ class ShortcutManager:
             # A window-wide QShortcut fires from any tab, so the gating a mouse gets for free on a
             # disabled or mode-hidden control has to be applied here by hand.
             if not slider.isEnabled() or hidden_by_gating(slider):
-                self.window.controller.set_status(f"{_slider_name(slider, group)} not available", 1500, kind="warning")
+                self.window.controller.set_status(tr("{value} not available", value=_slider_name(slider, group)), 1500, kind="warning")
                 return
             step = slider_step_for(group.id, self.slider_steps)
             slider.adjust_by(step * sign_for_action(action_id))
@@ -405,7 +421,7 @@ class ShortcutManager:
         spin = getattr(slider, "spin", None)
         # The spin box already carries this slider's decimals and unit suffix.
         value = spin.text().strip() if spin is not None else f"{slider.value():.2f}"
-        self.window.controller.set_status(f"{name} {value}", 1500)
+        self.window.controller.set_status(tr("{value} {value1}", value=name, value1=value), 1500)
 
     def _build_actions(self) -> dict[str, Callable[[], None]]:
         controller = self.window.controller
@@ -414,8 +430,8 @@ class ShortcutManager:
         right = self.window.right_panel
 
         actions: dict[str, Callable[[], None]] = {
-            "prev_file": controller.session.prev_file,
-            "next_file": controller.session.next_file,
+            "prev_file": lambda: _step_file(controller, -1),
+            "next_file": lambda: _step_file(controller, 1),
             "first_file": controller.session.first_file,
             "last_file": controller.session.last_file,
             "toggle_keep": lambda: controller.session.toggle_mark("keeper"),
@@ -448,7 +464,9 @@ class ShortcutManager:
             "metadata_clear_gear": lambda: right.metadata_sidebar.gear_clear_btn.click(),
             "metadata_clear_process": lambda: right.metadata_sidebar.process_clear_btn.click(),
             "metadata_clear_scanning": lambda: right.metadata_sidebar.scan_clear_btn.click(),
+            "assign_sequential_frame": lambda: right.metadata_sidebar.frame_sequence_btn.click(),
             "scan_setup": lambda: controls.sensor_sidebar.scan_setup_btn.click(),
+            "measure_chart": lambda: controls.sensor_sidebar.measure_chart_btn.click(),
             "scan_prescan": (lambda: right.scan_sidebar.prescan_btn.click() if getattr(right, "scan_sidebar", None) is not None else None),
             "scan_meter_frame": (
                 lambda: right.scan_sidebar.exposure_meter_btn.click() if getattr(right, "scan_sidebar", None) is not None else None
@@ -458,6 +476,9 @@ class ShortcutManager:
             "scan_new_roll": lambda: right.scan_output.new_roll_btn.click(),
             "scanlight_keep_light_on": lambda: (
                 right.scanlight_sidebar.keep_light_btn.toggle() if not right.scanlight_sidebar.keep_light_btn.isHidden() else None
+            ),
+            "scanlight_infrared": lambda: (
+                right.scanlight_sidebar.ir_toggle.toggle() if not right.scanlight_sidebar._ir_exposure_widget.isHidden() else None
             ),
             "mode_color_negative": lambda: controls.process_sidebar.mode_btn.setCurrentIndex(0),
             "mode_bw_negative": lambda: controls.process_sidebar.mode_btn.setCurrentIndex(1),
@@ -482,6 +503,7 @@ class ShortcutManager:
             "local_oval": lambda: _toggle_tool_button(self.window, "tone", controls.local_sidebar.oval_btn),
             "local_gradient": lambda: _toggle_tool_button(self.window, "tone", controls.local_sidebar.gradient_btn),
             "analysis_draw": lambda: _toggle_tool_button(self.window, "roll", controls.process_sidebar.analysis_region_btn),
+            "film_base": lambda: _toggle_tool_button(self.window, "roll", controls.process_sidebar.film_base_btn),
             "open_tools_menu": lambda: self.window.toolbar.open_tools_menu(),
             "toggle_flat_peek": controller.toggle_flat_peek,
             "toggle_negative_peek": controller.toggle_negative_peek,
@@ -490,7 +512,10 @@ class ShortcutManager:
             "toggle_zones": controller.toggle_zones_overlay,
             "toggle_clipping_overlay": controller.toggle_clipping_overlay,
             "toggle_zone_hover_highlight": controller.toggle_zone_hover_highlight,
+            "toggle_parade_overlay": lambda: _toggle_if_live(right.parade_overlay_btn),
+            "toggle_scan_parade_base": lambda: _toggle_if_live(right.scan_base_btn),
             "toggle_test_strip": controller.toggle_test_strip,
+            "toggle_paper_strip": controller.toggle_paper_strip,
             "toggle_pick_better": controller.toggle_pick_better,
             "finish_pick_better": controller.pick_better_finish,
             "undo_pick_better": controller.pick_better_undo,
@@ -592,6 +617,7 @@ class ShortcutManager:
             "toggle_auto_density": controls.tone_sidebar.auto_density_action.trigger,
             "toggle_auto_grade": controls.tone_sidebar.auto_grade_action.trigger,
             "toggle_auto_both": controls.tone_sidebar.auto_both_action.trigger,
+            "toggle_hold_black": controls.tone_sidebar.hold_black_action.trigger,
             "preset_apply": controls.presets_sidebar.apply_btn.click,
             "preset_save": controls.presets_sidebar.save_btn.click,
         }

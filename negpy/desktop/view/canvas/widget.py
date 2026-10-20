@@ -1,3 +1,4 @@
+from negpy.kernel.system.i18n import tr
 from typing import TYPE_CHECKING, Any, Optional, Tuple
 import math
 import sys
@@ -54,6 +55,7 @@ _TOOL_CURSORS: dict[ToolMode, Qt.CursorShape] = {
     ToolMode.LOCAL_OVAL: Qt.CursorShape.CrossCursor,
     ToolMode.LOCAL_GRADIENT: Qt.CursorShape.CrossCursor,
     ToolMode.ANALYSIS_DRAW: Qt.CursorShape.CrossCursor,
+    ToolMode.FILM_BASE: Qt.CursorShape.CrossCursor,
     ToolMode.STRAIGHTEN: Qt.CursorShape.CrossCursor,
     ToolMode.KEYSTONE_LINES: Qt.CursorShape.CrossCursor,
     ToolMode.ZONE_PLACE: Qt.CursorShape.CrossCursor,
@@ -133,6 +135,7 @@ class ImageCanvas(QWidget):
     straighten_completed = pyqtSignal(float)
     keystone_line_marked = pyqtSignal(str, float, float, float, float)
     test_strip_picked = pyqtSignal(int, int)
+    paper_strip_kept = pyqtSignal()
     zone_pin_moved = pyqtSignal(int, float, float, bool)
     zone_placement_confirmed = pyqtSignal()
     local_mask_selected = pyqtSignal(int)
@@ -200,6 +203,7 @@ class ImageCanvas(QWidget):
         self.overlay.straighten_completed.connect(self.straighten_completed.emit)
         self.overlay.keystone_line_marked.connect(self.keystone_line_marked.emit)
         self.overlay.test_strip_picked.connect(self.test_strip_picked.emit)
+        self.overlay.paper_strip_kept.connect(self.paper_strip_kept.emit)
         self.overlay.zone_pin_moved.connect(self.zone_pin_moved.emit)
         self.overlay.zone_placement_confirmed.connect(self.zone_placement_confirmed.emit)
         self.overlay.local_mask_selected.connect(self.local_mask_selected.emit)
@@ -338,7 +342,7 @@ class ImageCanvas(QWidget):
         where a settled frame carries every scan pixel and only a transient proxy does not."""
         if self.state.hq_preview or self._source_scale() >= 1.0:
             return ""
-        return "preview res · HQ off" if self.current_zoom_percent() >= 100 else ""
+        return tr("preview res · HQ off") if self.current_zoom_percent() >= 100 else ""
 
     def fit_to_window(self) -> None:
         """Fit the image to the viewport (zoom_level 1.0 is the shader's fit); reset pan."""
@@ -821,33 +825,33 @@ class ImageCanvas(QWidget):
             return
 
         menu = QMenu(self)
-        act_wb = menu.addAction(label_with_shortcut("Pick WB", "pick_wb"))
+        act_wb = menu.addAction(label_with_shortcut(tr("Pick WB"), "pick_wb"))
         act_wb.triggered.connect(lambda: self._controller.set_active_tool(ToolMode.WB_PICK))  # type: ignore[union-attr]
-        act_dust = menu.addAction(label_with_shortcut("Pick Dust", "pick_dust"))
+        act_dust = menu.addAction(label_with_shortcut(tr("Pick Dust"), "pick_dust"))
         act_dust.triggered.connect(lambda: self._controller.set_active_tool(ToolMode.DUST_PICK))  # type: ignore[union-attr]
         self._add_exclude_action(menu, pos)
         menu.addSeparator()
-        act_copy = menu.addAction(label_with_shortcut("Copy Settings", "copy"))
+        act_copy = menu.addAction(label_with_shortcut(tr("Copy Settings"), "copy"))
         act_copy.triggered.connect(self._controller.session.copy_settings)  # type: ignore[union-attr]
-        act_copy_bounds = menu.addAction(label_with_shortcut("Copy Settings + Bounds", "copy_with_bounds"))
+        act_copy_bounds = menu.addAction(label_with_shortcut(tr("Copy Settings + Bounds"), "copy_with_bounds"))
         act_copy_bounds.triggered.connect(self._controller.session.copy_settings_with_bounds)  # type: ignore[union-attr]
-        act_paste = menu.addAction(label_with_shortcut("Paste Settings", "paste"))
+        act_paste = menu.addAction(label_with_shortcut(tr("Paste Settings"), "paste"))
         act_paste.triggered.connect(lambda: open_paste_dialog(self, self._controller))  # type: ignore[arg-type]
         act_paste.setEnabled(self.state.clipboard is not None)
-        act_sync_bounds = menu.addAction(label_with_shortcut("Sync Bounds…", "sync_bounds"))
+        act_sync_bounds = menu.addAction(label_with_shortcut(tr("Sync Bounds…"), "sync_bounds"))
         act_sync_bounds.triggered.connect(lambda: open_sync_bounds_dialog(self, self._controller.session))  # type: ignore[union-attr]
         menu.addSeparator()
         self._add_reset_actions(menu)
         menu.addSeparator()
-        act_reset = menu.addAction("Reset View")
+        act_reset = menu.addAction(tr("Reset View"))
         act_reset.triggered.connect(self.fit_to_window)
-        act_sticky_zoom = menu.addAction("Sticky Zoom")
+        act_sticky_zoom = menu.addAction(tr("Sticky Zoom"))
         act_sticky_zoom.setCheckable(True)
         act_sticky_zoom.setChecked(self.state.sticky_zoom)
         act_sticky_zoom.toggled.connect(self._controller.session.set_sticky_zoom)  # type: ignore[union-attr]
         menu.addSeparator()
         self._add_merge_to_tiff_action(menu)
-        act_unload = menu.addAction("Unload…")
+        act_unload = menu.addAction(tr("Unload…"))
         act_unload.triggered.connect(self._unload_current_file)
         menu.exec(global_pos)
 
@@ -863,8 +867,8 @@ class ImageCanvas(QWidget):
         """The Film Strip's frame resets, for the frame on the canvas."""
         controller = self._controller
         assert controller is not None
-        menu.addAction("Reset Settings").triggered.connect(controller.session.reset_settings)
-        act_roll = menu.addAction(label_with_shortcut("Reset to Roll Settings", "reset_to_roll"))
+        menu.addAction(tr("Reset Settings")).triggered.connect(controller.session.reset_settings)
+        act_roll = menu.addAction(label_with_shortcut(tr("Reset to Roll Settings"), "reset_to_roll"))
         act_roll.triggered.connect(controller.revert_frame_to_roll)
         act_roll.setEnabled(controller.can_revert_frame_to_roll())
         menu.addAction(label_with_shortcut(SIDECAR_LABEL, "load_sidecar")).triggered.connect(
@@ -879,7 +883,7 @@ class ImageCanvas(QWidget):
         coords = self.overlay.image_coords_at(pos)
         if coords is None:
             return
-        act = menu.addAction("Exclude from Optical Removal")
+        act = menu.addAction(tr("Exclude from Optical Removal"))
         act.triggered.connect(lambda _=False, c=coords: self._controller.handle_dust_exclusion_painted([c]))  # type: ignore[union-attr]
 
     def _unload_current_file(self) -> None:
@@ -896,18 +900,18 @@ class ImageCanvas(QWidget):
         assert controller is not None
         count = len(self.state.config.retouch.clone_strokes)
         menu = QMenu(self)
-        act_source = menu.addAction("Pick New Source")
+        act_source = menu.addAction(tr("Pick New Source"))
         act_source.triggered.connect(lambda: controller.arm_clone_source(True))
         menu.addSeparator()
         hit = self.overlay.heal_hit_test(pos)
         if hit is not None and hit[0] == "clone":
-            act_delete = menu.addAction("Delete This Clone")
+            act_delete = menu.addAction(tr("Delete This Clone"))
             act_delete.triggered.connect(lambda _=False, i=hit[1]: controller.delete_clone(i))
             menu.addSeparator()
-        act_undo = menu.addAction(label_with_shortcut("Undo Last Clone", "undo"))
+        act_undo = menu.addAction(label_with_shortcut(tr("Undo Last Clone"), "undo"))
         act_undo.triggered.connect(controller.undo_last_clone)
         act_undo.setEnabled(count > 0)
-        act_clear = menu.addAction("Clear All Clones…")
+        act_clear = menu.addAction(tr("Clear All Clones…"))
         act_clear.triggered.connect(controller.clear_clones)
         act_clear.setEnabled(count > 0)
         menu.exec(global_pos)
@@ -922,10 +926,10 @@ class ImageCanvas(QWidget):
         menu = QMenu(self)
 
         if self.state.active_tool == ToolMode.SCRATCH_PICK:
-            act_confirm = menu.addAction("Confirm Scratch  Enter")
+            act_confirm = menu.addAction(tr("Confirm Scratch  Enter"))
             act_confirm.triggered.connect(self.overlay.confirm_scratch)
             act_confirm.setEnabled(self.overlay.has_scratch_points())
-            act_point = menu.addAction("Undo Last Point  Backspace")
+            act_point = menu.addAction(tr("Undo Last Point  Backspace"))
             act_point.triggered.connect(self.overlay.undo_last_scratch_point)
             act_point.setEnabled(self.overlay.has_scratch_points())
             menu.addSeparator()
@@ -933,17 +937,17 @@ class ImageCanvas(QWidget):
         hit = self.overlay.heal_hit_test(pos)
         if hit is not None:
             kind, index = hit
-            act_delete = menu.addAction("Delete This Clone" if kind == "clone" else "Delete This Heal")
+            act_delete = menu.addAction(tr("Delete This Clone") if kind == "clone" else tr("Delete This Heal"))
             act_delete.triggered.connect(
                 lambda _=False, k=kind, i=index: controller.delete_clone(i) if k == "clone" else controller.delete_heal(k, i)
             )
             menu.addSeparator()
 
         self._add_exclude_action(menu, pos)
-        act_undo = menu.addAction(label_with_shortcut("Undo Last Heal", "undo"))
+        act_undo = menu.addAction(label_with_shortcut(tr("Undo Last Heal"), "undo"))
         act_undo.triggered.connect(controller.undo_last_retouch)
         act_undo.setEnabled(num_heals > 0)
-        act_clear = menu.addAction("Clear All Heals…")
+        act_clear = menu.addAction(tr("Clear All Heals…"))
         act_clear.triggered.connect(controller.clear_retouch)
         act_clear.setEnabled(num_heals > 0)
         menu.exec(global_pos)

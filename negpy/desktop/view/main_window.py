@@ -1,3 +1,4 @@
+from negpy.kernel.system.i18n import tr
 import os
 from typing import Optional
 
@@ -107,23 +108,23 @@ class _EmptyStateOverlay(QWidget):
         layout.setSpacing(12)
 
         self.load_btn = labeled_action(
-            "fa5s.folder-open", "Load Scans…", "Import a folder as a roll, add single files, or scan film", primary=True
+            "fa5s.folder-open", tr("Load Scans…"), tr("Import a folder as a roll, add single files, or scan film"), primary=True
         )
         self.load_btn.clicked.connect(self._show_load_menu)
         layout.addWidget(self.load_btn, alignment=Qt.AlignmentFlag.AlignHCenter)
-        drop_hint = hint_label("Or drop pictures or a folder onto the window")
+        drop_hint = hint_label(tr("Or drop pictures or a folder onto the window"))
         drop_hint.setWordWrap(False)
         layout.addWidget(drop_hint, alignment=Qt.AlignmentFlag.AlignHCenter)
 
-        self.tour_btn = labeled_action("", "Take the Tour", "A short guided walk through the panels")
+        self.tour_btn = labeled_action("", tr("Take the Tour"), tr("A short guided walk through the panels"))
         self.tour_btn.clicked.connect(self.tour_requested)
         layout.addWidget(self.tour_btn, alignment=Qt.AlignmentFlag.AlignHCenter)
 
     def _show_load_menu(self) -> None:
         menu = QMenu(self)
-        menu.addAction("Import Folder as a Roll…").triggered.connect(self.import_roll_requested)
-        menu.addAction("Add Files…").triggered.connect(self.add_files_requested)
-        menu.addAction("Scan…").triggered.connect(self.scan_requested)
+        menu.addAction(tr("Import Folder as a Roll…")).triggered.connect(self.import_roll_requested)
+        menu.addAction(tr("Add Files…")).triggered.connect(self.add_files_requested)
+        menu.addAction(tr("Scan…")).triggered.connect(self.scan_requested)
         menu.exec(self.load_btn.mapToGlobal(self.load_btn.rect().bottomLeft()))
 
     def eventFilter(self, obj, event) -> bool:
@@ -151,7 +152,7 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         self._init_ui()
-        self._pick_better_window = PickBetterWindow(self, repo=self.controller.session.repo)
+        self._pick_better_window = PickBetterWindow(self)
         self._connect_signals()
         self.shortcut_manager = setup_keyboard_shortcuts(self)
         self.space_pan_filter = SpacePanKeyFilter(self)
@@ -227,8 +228,8 @@ class MainWindow(QMainWindow):
         if paths:
             reply = QMessageBox.question(
                 self,
-                "Restore Session",
-                f"Reopen your last session ({count_of(len(paths), 'file')})?",
+                tr("Restore Session"),
+                tr("Reopen your last session ({value})?", value=count_of(len(paths), "file")),
             )
             if reply == QMessageBox.StandardButton.Yes:
                 self.controller.restore_session()
@@ -255,7 +256,7 @@ class MainWindow(QMainWindow):
             return
         if data is None and not self.state.monitor_profile_override and not getattr(self, "_icc_miss_notified", False):
             self._icc_miss_notified = True
-            self.canvas.hud.showMessage("No monitor ICC profile detected — preview assumes sRGB", 6000, kind="warning")
+            self.canvas.hud.showMessage(tr("No monitor ICC profile detected — preview assumes sRGB"), 6000, kind="warning")
         self.controller.set_monitor_detected(data)
 
     def _init_ui(self) -> None:
@@ -291,7 +292,10 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(
                 0,
                 lambda: self.canvas.hud.showMessage(
-                    f"GPU viewport failed to start — display runs on the CPU ({self.state.gpu_viewport_failed})",
+                    tr(
+                        "GPU viewport failed to start — display runs on the CPU ({gpu_viewport_failed})",
+                        gpu_viewport_failed=self.state.gpu_viewport_failed,
+                    ),
                     8000,
                     kind="warning",
                 ),
@@ -312,9 +316,9 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.central_widget)
 
         self.drawer = PinnableDockWidget(
-            "Controls",
+            tr("Controls"),
             self,
-            pin_tooltip=tooltip_with_shortcut("Dock controls panel to right", "toggle_right_panel"),
+            pin_tooltip=tooltip_with_shortcut(tr("Dock controls panel to right"), "toggle_right_panel"),
             on_pin=self.dock_controls_panel,
             docked_title=FindField(self.show_command_palette),
         )
@@ -330,9 +334,9 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.drawer)
 
         self.session_dock = PinnableDockWidget(
-            "Session",
+            tr("Session"),
             self,
-            pin_tooltip=tooltip_with_shortcut("Dock session panel to left", "toggle_left_panel"),
+            pin_tooltip=tooltip_with_shortcut(tr("Dock session panel to left"), "toggle_left_panel"),
             on_pin=self.dock_session_panel,
         )
         self.session_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
@@ -356,10 +360,10 @@ class MainWindow(QMainWindow):
         self.drawer.setVisible(repo.get_global_setting("panel_right_visible", True))
 
     TOOL_LABELS: dict[ToolMode, str] = {
-        ToolMode.WB_PICK: "WB Picker",
+        ToolMode.WB_PICK: tr("WB Picker"),
         ToolMode.CROP_MANUAL: "Crop",
-        ToolMode.DUST_PICK: "Heal Tool",
-        ToolMode.CLONE: "Clone Tool",
+        ToolMode.DUST_PICK: tr("Heal Tool"),
+        ToolMode.CLONE: tr("Clone Tool"),
     }
 
     def _update_title(self) -> None:
@@ -369,9 +373,9 @@ class MainWindow(QMainWindow):
             prefix = "● " if state.is_dirty else ""
             tool = self.TOOL_LABELS.get(state.active_tool)
             tool_prefix = f"[{tool}] " if tool else ""
-            self.setWindowTitle(f"{prefix}NegPy — {tool_prefix}{filename}")
+            self.setWindowTitle(tr("{prefix}NegPy — {tool_prefix}{filename}", prefix=prefix, tool_prefix=tool_prefix, filename=filename))
         else:
-            self.setWindowTitle("NegPy")
+            self.setWindowTitle(tr("NegPy"))
 
     def _on_immersive_changed(self) -> None:
         if getattr(self, "_last_immersive", None) != self.controller.session.state.immersive_canvas:
@@ -401,12 +405,16 @@ class MainWindow(QMainWindow):
         from negpy.kernel.system.version import GITHUB_REPO, get_app_version
 
         box = QMessageBox(self)
-        box.setWindowTitle("About NegPy")
+        box.setWindowTitle(tr("About NegPy"))
         box.setIconPixmap(self.windowIcon().pixmap(64, 64))
         box.setTextFormat(Qt.TextFormat.RichText)
         box.setText(
-            f"<b>NegPy</b> {get_app_version()}<br>Film negatives printed through a virtual darkroom.<br>"
-            f'<a href="https://github.com/{GITHUB_REPO}">github.com/{GITHUB_REPO}</a>'
+            tr(
+                '<b>NegPy</b> {value}<br>Film negatives printed through a virtual darkroom.<br><a href="https://github.com/{GITHUB_REPO}">github.com/{value1}</a>',
+                value=get_app_version(),
+                GITHUB_REPO=GITHUB_REPO,
+                value1=GITHUB_REPO,
+            )
         )
         box.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
         label = box.findChild(QLabel, "qt_msgbox_label")
@@ -425,7 +433,9 @@ class MainWindow(QMainWindow):
         dlg = ScanSetupDialog(self, repo.get_global_setting("scan_setup"), repo=repo)
         # Cancel leaves scan_setup unset: an unanswered wizard is not an answer, so it asks again.
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            self.controller.apply_scan_setup(**dlg.choice())
+            choice = dlg.choice()
+            self.controller.apply_scan_setup(**choice)
+            self.right_panel.show_scan_source("camera" if choice["capture"] == "camera" else "film")
 
     def _restore_default_dock_state(self) -> None:
         """Restore both docks to the snapshot taken at startup (home edge + width)."""
@@ -479,7 +489,7 @@ class MainWindow(QMainWindow):
             return
         image = self._reference_snapshot()
         if image is None:
-            self.canvas.hud.showMessage("Open a frame to pin it as the reference", 3000)
+            self.canvas.hud.showMessage(tr("Open a frame to pin it as the reference"), 3000)
             return
         self.reference_pane.set_reference(image, os.path.basename(self.state.current_file_path))
         self.reference_pane.show()
@@ -515,7 +525,7 @@ class MainWindow(QMainWindow):
         # Both panels hide with it, so an empty grid would have no way back but Esc.
         if on and self.controller.session.asset_model.rowCount() == 0:
             on = False
-            self.controller.set_status("No frames match the filter" if self.state.uploaded_files else "No frames loaded", 3000)
+            self.controller.set_status(tr("No frames match the filter") if self.state.uploaded_files else tr("No frames loaded"), 3000)
         browser.light_table_btn.blockSignals(True)
         browser.light_table_btn.setChecked(on)
         browser.light_table_btn.blockSignals(False)
@@ -543,7 +553,7 @@ class MainWindow(QMainWindow):
         self.drawer.setVisible(True)
         self.controller.session.repo.save_global_setting("panel_left_visible", True)
         self.controller.session.repo.save_global_setting("panel_right_visible", True)
-        self.canvas.hud.showMessage("Panel layout reset", timeout=1500)
+        self.canvas.hud.showMessage(tr("Panel layout reset"), timeout=1500)
 
     def _connect_signals(self) -> None:
         """Wire controller and view."""
@@ -594,8 +604,8 @@ class MainWindow(QMainWindow):
 
         self.controller.export_progress.connect(self._on_export_progress)
         self.controller.export_finished.connect(self._on_export_finished)
-        self.controller.session.settings_copied.connect(lambda: self.canvas.hud.showMessage("Settings copied", timeout=1500))
-        self.controller.session.settings_pasted.connect(lambda: self.canvas.hud.showMessage("Settings pasted", timeout=1500))
+        self.controller.session.settings_copied.connect(lambda: self.canvas.hud.showMessage(tr("Settings copied"), timeout=1500))
+        self.controller.session.settings_pasted.connect(lambda: self.canvas.hud.showMessage(tr("Settings pasted"), timeout=1500))
         self.controller.session.color_vision_changed.connect(self.canvas.overlay.update)
         model = self.controller.session.asset_model
         for signal in (model.layoutChanged, model.modelReset, model.rowsRemoved):
@@ -626,6 +636,7 @@ class MainWindow(QMainWindow):
         self.controller.compare_hold_changed.connect(lambda _on: self.canvas.overlay.update())
         self.controller.test_strip_changed.connect(lambda _up: self.canvas.overlay.on_test_strip_changed())
         self.canvas.test_strip_picked.connect(self.controller.apply_test_strip_pick)
+        self.canvas.paper_strip_kept.connect(self.controller.keep_paper_strip)
         self.controller.pick_better_changed.connect(self._on_pick_better_changed)
         self.controller.pick_better_ready.connect(self._on_pick_better_ready)
         self._pick_better_window.picked.connect(self.controller.pick_better_select)
@@ -654,7 +665,6 @@ class MainWindow(QMainWindow):
         if not up:
             self._pick_better_window.hide()
             return
-        self._pick_better_window.size_and_center_to(self)
         self._pick_better_window.show()
         self._pick_better_window.raise_()
 
@@ -698,15 +708,15 @@ class MainWindow(QMainWindow):
         render, so the composing happens here rather than in an export worker."""
         sheet = self.canvas.overlay.printing_notes_sheet()
         if sheet is None:
-            self.controller.set_status("Printing notes need a rendered frame", 4000)
+            self.controller.set_status(tr("Printing notes need a rendered frame"), 4000)
             return
         path = self.controller.printing_notes_target_path()
         if not path:
             return
         if sheet.save(path, "JPEG", self.controller.state.config.export.jpeg_quality):
-            self.controller.set_status(f"Printing notes saved: {os.path.basename(path)}", 4000)
+            self.controller.set_status(tr("Printing notes saved: {value}", value=os.path.basename(path)), 4000)
         else:
-            self.controller.set_status(f"Could not write {path}", 4000, kind="error")
+            self.controller.set_status(tr("Could not write {path}", path=path), 4000, kind="error")
 
     def _display_buffer_for_canvas(self, buffer):
         if isinstance(buffer, GPUTexture):
@@ -824,7 +834,7 @@ class MainWindow(QMainWindow):
 
     def _on_export_progress(self, current: int, total: int, filename: str) -> None:
         self.canvas.hud.set_progress(current, total)
-        self.canvas.hud.showMessage(f"Exporting {filename} ({current}/{total})…")
+        self.canvas.hud.showMessage(tr("Exporting {filename} ({current}/{total})…", filename=filename, current=current, total=total))
 
     def _on_export_finished(self, elapsed: float, errors: list) -> None:
         self.canvas.hud.hide_progress()
@@ -834,7 +844,12 @@ class MainWindow(QMainWindow):
         self.canvas.hud.showMessage(msg, timeout=6000 if errors else 3000, kind="warning" if errors else "info")
         if errors:
             # A toast holds one line and the next one replaces it; the box keeps every file.
-            box = QMessageBox(QMessageBox.Icon.Warning, "Export", f"{count_of(len(errors), 'file')} could not be exported.", parent=self)
+            box = QMessageBox(
+                QMessageBox.Icon.Warning,
+                tr("Export"),
+                tr("{value} could not be exported.", value=count_of(len(errors), "file")),
+                parent=self,
+            )
             box.setDetailedText("\n".join(errors))
             box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
             box.open()
@@ -853,7 +868,7 @@ class MainWindow(QMainWindow):
             return
         from negpy.features.exposure.densitometer import zone_roman
 
-        self.canvas.hud.showMessage(f"Click the photo to place zone {zone_roman(float(zone))}", timeout=3000)
+        self.canvas.hud.showMessage(tr("Click the photo to place zone {value}", value=zone_roman(float(zone))), timeout=3000)
 
     def _sync_tool_buttons(self) -> None:
         """Updates toggle button states to match active_tool."""

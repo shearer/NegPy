@@ -19,6 +19,7 @@ from negpy.features.exposure.analysis import (
     vectorscope_histogram,
     waveform,
     waveform_color,
+    waveform_parade,
 )
 from negpy.features.flatfield.models import FlatFieldConfig
 from negpy.features.lens.models import LensCorrections
@@ -128,13 +129,17 @@ class RenderTask:
     gain_slices: tuple = ()
     # EXIF orientation the decode baked into `buffer`, for the flat-field gain to take first.
     source_orientation: int = 1
+    # The roll's clear film base set with the Film Base tool, per-channel log10 transmittance;
+    # None lets the rebate reader stand in.
+    film_base: Optional[tuple] = None
 
 
 @dataclass(frozen=True)
 class TestStripTask:
-    """Request to print a proof mosaic off one frame: the density × grade strip or the color
-    ring-around. `overrides` is one ExposureConfig field-override dict per patch, row-major
-    over `grid`, unrotated — the worker assembles all four orientations."""
+    """Request to print a proof mosaic off one frame: the density × grade strip, the color
+    ring-around or the paper strip. `overrides` is one ExposureConfig field-override dict per
+    patch, row-major over `grid`, unrotated — the worker assembles all four orientations.
+    `keep_tiles` also hands back every whole-frame render, which the paper strip shows full frame."""
 
     buffer: np.ndarray
     config: WorkspaceConfig
@@ -150,6 +155,7 @@ class TestStripTask:
     # As-shot WB multipliers, needed only when the buffer was decoded without WB.
     camera_wb: Optional[list] = None
     source_orientation: int = 1
+    keep_tiles: bool = False
 
 
 @dataclass(frozen=True)
@@ -250,9 +256,8 @@ class ThumbnailRenderInput:
     file_info: dict
     config: WorkspaceConfig
     thumbnail_key: str
-    # Whether an Input ICC (explicit override or the implicit Narrowband Scan profile)
-    # applies to this frame — mirrors AppController.effective_input_icc, resolved at
-    # dispatch since the worker has no session state to check it itself.
+    # Whether an Input ICC applies to this frame — mirrors AppController.effective_input_icc,
+    # resolved at dispatch since the worker has no session state to check it itself.
     icc_input_active: bool = False
 
 
@@ -329,7 +334,7 @@ class RenderWorker(QObject):
 
     finished = pyqtSignal(object, dict)  # (ndarray|GPUTexture, metrics)
     metrics_updated = pyqtSignal(dict)  # Late-arriving metrics (histogram, etc.)
-    strip_finished = pyqtSignal(object, object)  # (one mosaic ndarray per quarter-turn, content_rect|None)
+    strip_finished = pyqtSignal(object, object, object)  # (one mosaic ndarray per quarter-turn, content_rect|None, tiles|None)
     strip_progress = pyqtSignal(int, int)  # (patches printed, total)
     pick_better_finished = pyqtSignal(object, object, object)  # (current, left, right ndarrays)
     busy = pyqtSignal(str)  # a slow uncached pipeline step is starting
@@ -394,6 +399,7 @@ class RenderWorker(QObject):
                 crop_preview_full=task.crop_preview_full,
                 cam_xyz=task.cam_xyz,
                 camera_wb=task.camera_wb,
+                film_base=task.film_base,
                 gain_slices=task.gain_slices + ((n, task.split_x, None, task.gutter_thickness, task.split_axis),),
                 source_orientation=task.source_orientation,
             )
@@ -407,7 +413,11 @@ class RenderWorker(QObject):
         metrics.pop("histogram_raw", None)
         metrics.pop("waveform", None)
         metrics.pop("waveform_color", None)
+        metrics.pop("waveform_parade", None)
         metrics.pop("vectorscope", None)
+        # No joined scan to rebin; None, not a pop, so the merged metrics drop the last frame's.
+        metrics["density_parade"] = None
+        metrics["scan_full_scale"] = None
         along = 1 if task.split_axis == "x" else 0
         gap = gap_px(left.shape[along], right.shape[along], task.gutter_thickness)
         return join_halves(left, right, gap, axis=task.split_axis), metrics
@@ -436,6 +446,7 @@ class RenderWorker(QObject):
                     camera_wb=task.camera_wb,
                     gain_slices=task.gain_slices,
                     source_orientation=task.source_orientation,
+                    film_base=task.film_base,
                 )
 
             # CPU renders have no in-shader histogram; bin the float output here.
@@ -444,6 +455,7 @@ class RenderWorker(QObject):
                 metrics["histogram_color"] = color_histogram(result)
                 metrics["waveform"] = waveform(result)
                 metrics["waveform_color"] = waveform_color(result)
+                metrics["waveform_parade"] = waveform_parade(result)
                 metrics["vectorscope"] = vectorscope_histogram(result)
 
             # The soft proof is not baked in: it rides the display LUT, so a GPU texture reaches
@@ -525,7 +537,7 @@ class RenderWorker(QObject):
             mosaics = tuple(strip_mosaic(rotate_grid(tiles, task.grid, k), proof_grid(task.grid, k)) for k in range(4))
             # Unproofed like every other rendered buffer. The overlay proofs the mosaic through
             # the same display LUT the canvas uses.
-            self.strip_finished.emit(mosaics, content_rect)
+            self.strip_finished.emit(mosaics, content_rect, tuple(tiles) if task.keep_tiles else None)
 
         except Exception as e:
             logger.exception("Test strip render failed")
@@ -1136,9 +1148,12 @@ class AssetDiscoveryWorker(QObject):
         by_time = len(times) == len(ordered)
         ordered = capture_ordered(ordered, times)
 
-        probes = self._map_files(ordered, probe_frame, lambda p: f"RGB {os.path.basename(p)}", _DECODE_WORKERS)
-        items = [(p, classify_channel(pr.means)) for p, pr in zip(ordered, probes) if pr is not None]
-        signatures = {p: pr.signature for p, pr in zip(ordered, probes) if pr is not None}
+        # An infrared exposure shot beside a triplet (`_IR`) stays its own frame: gray, it would
+        # classify as a channel and shift every chunk after it.
+        candidates = [p for p in ordered if not os.path.splitext(os.path.basename(p))[0].lower().endswith("_ir")]
+        probes = self._map_files(candidates, probe_frame, lambda p: f"RGB {os.path.basename(p)}", _DECODE_WORKERS)
+        items = [(p, classify_channel(pr.means)) for p, pr in zip(candidates, probes) if pr is not None]
+        signatures = {p: pr.signature for p, pr in zip(candidates, probes) if pr is not None}
 
         result = list(assembled)
         grouped = set()
@@ -1168,7 +1183,7 @@ class AssetDiscoveryWorker(QObject):
             grouped.update({t.red, t.green, t.blue})
 
         result.extend(by_path[p] for p in ordered if p not in grouped)
-        loose = len(ordered) - len(grouped)
+        loose = len(candidates) - len(grouped)
         if loose:
             summary = {
                 "made": len(grouped) // 3,

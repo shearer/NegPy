@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.13"
 
 [[package]]
@@ -424,7 +424,7 @@ requires-dist = [
     { name = "imagecodecs", specifier = "==2026.6.6" },
     { name = "imageio", specifier = "==2.37.3" },
     { name = "jinja2", specifier = "==3.1.6" },
-    { name = "nkscan", marker = "extra == 'nkscan'", specifier = ">=0.14" },
+    { name = "nkscan", marker = "extra == 'nkscan'", specifier = ">=0.14.2" },
     { name = "numba", specifier = "==0.65.1" },
     { name = "numpy", specifier = "==2.4.4" },
     { name = "onnxruntime", specifier = "==1.23.2" },
@@ -459,14 +459,14 @@ sane = [{ name = "python-sane", specifier = ">=2.9" }]
 
 [[package]]
 name = "nkscan"
-version = "0.14.0"
+version = "0.14.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a6/bb/35fb31c036caadba238a2041abf4305d4ce3d08d5beee9e4f830293259a4/nkscan-0.14.0.tar.gz", hash = "sha256:4258f21036ca02c60096bdacaf24923f57a63a99cb19071b65b19f36e8a9b8ee", size = 2848023, upload-time = "2026-10-14T19:26:19.653Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0f/23/a99115465fcfac857742345bba7038192b53118b3bab4bbe1c0bfdbc3ed9/nkscan-0.14.2.tar.gz", hash = "sha256:2f4a8c3de9f73e076c1364af92fc566b126c1eec2d44482e779c86cade8b9d46", size = 2850116, upload-time = "2026-10-16T17:59:51.611Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ff/d4/b7bac6a88c9571d406c8537337cb1994381e23b56947d1e3a6ab60fd04af/nkscan-0.14.0-cp313-abi3-macosx_10_12_x86_64.whl", hash = "sha256:f3fd56728e0c8401fce25e110ef4c24a767017000a527de7c6cbb42f1405417d", size = 3791839, upload-time = "2026-10-14T19:26:12.636Z" },
-    { url = "https://files.pythonhosted.org/packages/45/df/452be982c66ab638925496621b92a5f93c1e3a645cc5068d7b3ce3effd54/nkscan-0.14.0-cp313-abi3-macosx_11_0_arm64.whl", hash = "sha256:933d1fa5649c6d9b070af8d555091d0365f8e0ac92e2d6e4e2cb8d67fcb9f4d0", size = 3795303, upload-time = "2026-10-14T19:26:14.57Z" },
-    { url = "https://files.pythonhosted.org/packages/29/28/c17a35558b72af97229ed27ee2b7790ae93f9e35e6573f18092537bbd1ae/nkscan-0.14.0-cp313-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:e34582e38e8c58c86b6cdd60c20b0028e8814823765a806b2474a97d11b013ee", size = 3929019, upload-time = "2026-10-14T19:26:16.139Z" },
-    { url = "https://files.pythonhosted.org/packages/85/ae/acd87b9222457931f98956ef2510c81a3b331482efeeefaa36ed6b930f15/nkscan-0.14.0-cp313-abi3-win_amd64.whl", hash = "sha256:08224858f98beea6543eb5f5522145228930517690d6e3a1fe667ac4f2729571", size = 3626297, upload-time = "2026-10-14T19:26:17.834Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/0f/918c06c216b302f06a51072ba88af8e8967e70dde5726a7a8a15ec08bdf3/nkscan-0.14.2-cp313-abi3-macosx_10_12_x86_64.whl", hash = "sha256:d46fa90c320cee5629eb5bd2d1e8ad7bbe6b13276ee41f886b8e07beaabd4439", size = 3793583, upload-time = "2026-10-16T17:59:43.42Z" },
+    { url = "https://files.pythonhosted.org/packages/db/0c/359acf66ffb761cd9168b505273c800c9f17b647a9e7265f1d6397152ce1/nkscan-0.14.2-cp313-abi3-macosx_11_0_arm64.whl", hash = "sha256:7c8fbf8754cfe795b8c13910edf579931f3cfac4a39034712dde352baf2d2be1", size = 3796594, upload-time = "2026-10-16T17:59:45.203Z" },
+    { url = "https://files.pythonhosted.org/packages/79/1b/4e4d22b6ec16bf905e8b3ca16f16603563cce2d7874bf1c4da2b0863bb1c/nkscan-0.14.2-cp313-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:94717316d492379177c516146945308c56e6915acdc7848e0222edbd4f6661d5", size = 3930981, upload-time = "2026-10-16T17:59:46.789Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/b3/2de4e2afe0df0c4ee1fb1b010d6d088c1f9886f7da14705ba484ac7a7cb3/nkscan-0.14.2-cp313-abi3-win_amd64.whl", hash = "sha256:734d1049d4203cfb4cedc1d69d0f53bbfa031fd3689c3a83d0452f1a43306e89", size = 3627105, upload-time = "2026-10-16T17:59:49.853Z" },
 ]
 
 [[package]]

@@ -752,6 +752,7 @@ class ImageProcessor:
         cache_stages: bool = True,
         gain_slices: tuple = (),
         source_orientation: int = 1,
+        film_base: Optional[tuple] = None,
     ) -> Tuple[Any, Dict[str, Any]]:
         """Executes rendering pipeline. Returns result (ndarray/GPUTexture) and metrics. ``skip_flatfield``: the export CPU
         fallbacks pass an already flat-fielded buffer. ``gain_slices``: the ``slice_half`` cuts that took *img* out of the
@@ -855,9 +856,12 @@ class ImageProcessor:
             cam_xyz=cam_xyz,
             camera_wb=camera_wb,
             cache_stages=cache_stages,
+            readback_metrics=readback_metrics,
         )
         if metrics:
             context.metrics.update(metrics)
+        if film_base is not None:
+            context.metrics["film_base"] = tuple(film_base)
         # The crop this render detected, for the controller to freeze into the edit. The key
         # rides along so a freeze that lands after the user moved on is discarded.
         if resolved_crop is not None:
@@ -900,6 +904,7 @@ class ImageProcessor:
                         analysis_source_hash=source_hash,
                         cam_xyz=cam_xyz,
                         camera_wb=camera_wb,
+                        film_base=film_base,
                         memory_bounded=True,
                         render_size_ref=render_size_ref,
                     )
@@ -915,6 +920,7 @@ class ImageProcessor:
                         analysis_source_hash=source_hash,
                         cam_xyz=cam_xyz,
                         camera_wb=camera_wb,
+                        film_base=film_base,
                         full_frame=crop_preview_full,
                     )
                 context.metrics.update(gpu_metrics)
@@ -1900,6 +1906,7 @@ class ImageProcessor:
                     render_size_ref=float(target_long_px),
                     prefer_gpu=False,
                     wants_uv_grid=False,
+                    readback_metrics=False,
                     skip_flatfield=True,  # f32_buffer already flat-fielded by _load_source_f32
                     cam_xyz=self._cam_xyz_by_path.get(file_path, (None, None))[0],
                     camera_wb=self._cam_xyz_by_path.get(file_path, (None, None))[1],
