@@ -346,19 +346,19 @@ Klicke mit der rechten Maustaste auf eine Hälfte für **Teilung für dieses Bil
 
 Korrigiert Farbfehler, die von Lichtquelle, Kamera und Film kommen.
 
-**Sensor-Übersprechprofil** (eine Einzelbelichtung bei schmalbandigem Licht, Lineares RAW): entfernt die Farbe, die zwischen den Kanälen des Sensors überläuft. Führe nach einer Änderung die **Rollenanalyse** erneut aus.
+**Sensor-Farbvermischungsprofil** (eine Einzelbelichtung bei schmalbandigem Licht, Lineares RAW): entfernt die Farbvermischung zwischen den Kanälen des Sensors. Führe nach einer Änderung die **Rollenanalyse** erneut aus.
 
-*   **Profil**: das Sensor-Übersprechprofil. Eigene `.toml`-Profile gehören in `<Documents>/NegPy/sensor/`.
-*   **Methode**: **Zweiskalig** (Standard) entfernt das Überlaufen und verhindert Sprenkel bei sehr starken Farben. **Linear** ist exakt, aber starke Farben können sprenkeln. **Dichte** sprenkelt nicht, starke Farben sind aber etwas matter.
+*   **Profil**: das Sensor-Farbvermischungsprofil. Eigene `.toml`-Profile gehören in `<Documents>/NegPy/sensor/`.
+*   **Methode**: **Zweiskalig** (Standard) entfernt den Mischanteil und verhindert Sprenkel bei sehr starken Farben. **Linear** ist exakt, aber starke Farben können sprenkeln. **Dichte** sprenkelt nicht, starke Farben sind aber etwas matter.
 *   **Kalibrieren**: erstellt ein Profil aus drei Aufnahmen der freien Lichtquelle (Rot, Grün und Blau), aus Dateien oder von einer angeschlossenen Kamera (siehe CAMERA_SCANNING.md).
 
-**Übersprechen** (Farbfilm): Filmfarbstoffe, deine Lichtquelle und dein Sensor mischen die Farben leicht. Eine Matrix trennt sie wieder. Führe nach einer Änderung die **Rollenanalyse** erneut aus.
+**Farbvermischung** (Farbfilm): Filmfarbstoffe, deine Lichtquelle und dein Sensor mischen die Farben leicht. Eine Matrix trennt sie wieder. Führe nach einer Änderung die **Rollenanalyse** erneut aus.
 
 *   **Matrix**: die Matrizen für diesen Filmtyp. Matrizen mit *(approx)* stammen aus Filmdatenblättern und sind ein Ausgangspunkt. Eigene `.toml`-Dateien gehören in `<Documents>/NegPy/crosstalk/` (siehe CROSSTALK.md). Die Regler-Schaltfläche öffnet den Editor. **+** erstellt eine neue Matrix. NegPy enthält keine Dia-Matrix.
 *   **Stärke**: wie stark die Matrix wirkt.
 *   Die Farbfeld-Schaltfläche öffnet **Aus Testtafel messen** (Farbnegative): Sie misst eine Matrix aus einer Aufnahme eines ColorChecker 24 oder SpyderCheckr 24 auf dem Film. Ziehe die vier Punkte auf die Eckfelder.
 
-**Farbton-Trimmung** (Kamera mit schmalbandigem Licht): dreht alle Farben auf dem Farbkreis, für ein Licht, das Gelb orange oder Grün oliv färbt. Lass den Wert bei weißem Licht auf 0. Sie wirkt auch bei Dias, wo das Sensor-Übersprechprofil nicht wirkt.
+**Farbton-Trimmung** (Kamera mit schmalbandigem Licht): dreht alle Farben auf dem Farbkreis, für ein Licht, das Gelb orange oder Grün oliv färbt. Lass den Wert bei weißem Licht auf 0. Sie wirkt auch bei Dias, wo das Sensor-Farbvermischungsprofil nicht wirkt.
 
 <!-- panel:process src:4e4010ca -->
 ### 10.4 Messung: Negativ → Positiv
@@ -593,7 +593,7 @@ Sichtbar, solange ein Scanlight verbunden ist. Eine Vorgabe enthält die Lichtwe
     *   **Von Hand einstellen**: Stelle die Regler selbst ein und speichere sie als Vorgabe. Ohne verbundene Kamera speichert sie keine Belichtung, und ein Scan nutzt die eigene der Kamera.
 *   **Rot**, **Grün**, **Blau**, **Weiß**: die Lichtwerte (0 bis 255). **Licht an** schaltet das Licht ein, um den Film einzurichten, oder aus.
 *   **Aufnahmemodus**: **Trichrom** macht eine Belichtung pro Farbe und fügt sie zusammen. **Einzelbelichtung** macht eine Belichtung mit allen drei Farben an.
-*   **Sensor-Übersprechprofil erstellen** (Einzelbelichtung): speichert zusätzlich ein Sensor-Übersprechprofil für diese Vorgabe (siehe Kalibrierung, §10.3).
+*   **Sensor-Farbvermischungsprofil erstellen** (Einzelbelichtung): speichert zusätzlich ein Sensor-Farbvermischungsprofil für diese Vorgabe (siehe Kalibrierung, §10.3).
 *   **ISO**, **Verschlusszeit**, **Blende**: die Belichtung der Vorgabe. Eine Änderung gilt, bis du die Vorgabe erneut wählst. Die Messtaste misst.
 *   **IR-Verschlusszeit** und **Infrarot** (Lichter mit Infrarot-LEDs): fügt jedem Scan eine Infrarotbelichtung für die Staubentfernung hinzu, gespeichert als `_IR`-Datei. Es braucht eine Kamera, die Infrarot sieht (Vollspektrum oder umgebaut), und manuellen Fokus. Nur für Farbfilm.
 *   **Kanalverzögerung**: eine Pause zwischen den Belichtungen für Rot, Grün und Blau, für Kameras, die sie brauchen.
