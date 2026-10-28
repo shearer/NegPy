@@ -74,6 +74,10 @@ params = [
     "--hidden-import=pyopticfilm",
     "--hidden-import=pyopticfilm.device.data",
     "--collect-all=pyopticfilm",
+    # Nikon Coolscan: nkscan is a Rust extension imported lazily by NkscanBackend, so
+    # static analysis misses it. Requires: uv sync --group nkscan before building.
+    "--hidden-import=nkscan",
+    "--collect-all=nkscan",
     # Ship PyUSB + bundled libusb on Windows only. Linux/macOS use host libusb
     # via PyUSB (same stack SANE needs).
     *(
